@@ -1088,9 +1088,12 @@ Style: HeadlineMain,Segoe UI Semibold,48,&H00F6F6F6,&H00F6F6F6,&H00141414,&H0000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
+    ass_content = ass_header + "\n".join(events) + "\n"
+    validate_ass_content(ass_content, str(output_path))
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        ass_header + "\n".join(events) + "\n",
+        ass_content,
         encoding="utf-8-sig",
     )
 

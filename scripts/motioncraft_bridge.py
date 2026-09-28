@@ -317,6 +317,56 @@ def layout_zone_at(tracks: list[dict[str, Any]], timestamp: float) -> str:
     return str(selected.get("free_zone") or "bottom")
 
 
+def subject_track_at(
+    tracks: list[dict[str, Any]],
+    timestamp: float,
+) -> dict[str, Any]:
+    if not tracks:
+        return {
+            "time": 0.0,
+            "face": {
+                "x": 0.32,
+                "y": 0.16,
+                "width": 0.36,
+                "height": 0.38,
+            },
+            "free_zone": "bottom",
+            "detected": False,
+        }
+
+    selected = tracks[0]
+
+    for track in tracks:
+        if float(track.get("time", 0.0)) > timestamp:
+            break
+        selected = track
+
+    return selected
+
+
+def assign_semantic_placements(
+    events: list[dict[str, Any]],
+    tracks: list[dict[str, Any]],
+    subtitle_analysis: dict[str, Any],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+
+    for event in events:
+        anchor = float(event.get("anchor", event.get("start", 0.0)))
+        track = subject_track_at(tracks, anchor)
+        caption_zone = caption_zone_at(subtitle_analysis, anchor)
+
+        placed = dict(event)
+        placed["placement_zone"] = preferred_zone(
+            track["face"],
+            caption_zone,
+        )
+        placed["avoids_caption_zone"] = caption_zone
+        output.append(placed)
+
+    return output
+
+
 def analyze_subject_layout(
     video: Path,
     duration: float,
@@ -423,8 +473,22 @@ def build_motion_plan(
     if duration <= 0:
         raise MotionCraftBridgeError("Durasi klip tidak valid pada transkrip/rencana.")
     warnings = transcript_warnings(transcript)
-    subject_tracks, tracking_source = analyze_subject_layout(video, duration, subtitle_analysis)
+    subject_tracks, tracking_source = analyze_subject_layout(
+        video,
+        duration,
+        subtitle_analysis,
+    )
     visual_events = normalize_visual_events(visual_plan, duration)
+    semantic_plan = assign_semantic_placements(
+        semantic_events(
+            transcript,
+            editorial_plan,
+            visual_plan,
+            duration,
+        ),
+        subject_tracks,
+        subtitle_analysis,
+    )
     for event in visual_events:
         midpoint = (float(event["start"]) + float(event["end"])) / 2.0
         event["placement_zone"] = (
@@ -455,7 +519,7 @@ def build_motion_plan(
             "sample_seconds": 0.75,
             "tracks": subject_tracks,
         },
-        "semantic_events": semantic_events(transcript, editorial_plan, visual_plan, duration),
+        "semantic_events": semantic_plan,
         "visual_events": visual_events,
         "qa": {
             "opening_reserved_until": OPENING_RESERVED_UNTIL,

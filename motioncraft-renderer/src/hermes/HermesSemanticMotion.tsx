@@ -40,6 +40,8 @@ type SemanticEvent = {
   strength: number;
   reason: string;
   effect: string;
+  placement_zone?: Zone;
+  avoids_caption_zone?: Zone | null;
 };
 
 type VisualEvent = {
@@ -313,9 +315,13 @@ export const HermesSemanticMotion: React.FC<HermesMotionProps> = (props) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const time = frame / fps;
-  const activeVisual = props.visual_events.some(
-    (event) => time >= event.start && time <= event.end,
-  );
+  const openingReserved =
+    time < props.qa.opening_reserved_until;
+  const activeVisual =
+    !openingReserved &&
+    props.visual_events.some(
+      (event) => time >= event.start && time <= event.end,
+    );
   const activeSemantic = props.semantic_events.filter(
     (event) => time >= event.start && time <= event.end,
   );
@@ -345,7 +351,7 @@ export const HermesSemanticMotion: React.FC<HermesMotionProps> = (props) => {
         ) : null}
       </AbsoluteFill>
 
-      {props.visual_events.map((event) => {
+      {!openingReserved ? props.visual_events.map((event) => {
         const from = Math.max(0, Math.round(event.start * fps));
         const duration = Math.max(1, Math.round((event.end - event.start) * fps));
         return (
@@ -353,16 +359,21 @@ export const HermesSemanticMotion: React.FC<HermesMotionProps> = (props) => {
             <VisualExplainer event={event} />
           </Sequence>
         );
-      })}
+      }) : null}
 
-      {!activeVisual
+      {!openingReserved && !activeVisual
         ? props.semantic_events.map((event) => {
             const from = Math.max(0, Math.round(event.start * fps));
             const duration = Math.max(
               1,
               Math.round((event.end - event.start) * fps),
             );
-            const zone = trackAt(props.subject_tracking.tracks, event.anchor).free_zone;
+            const zone =
+              event.placement_zone ||
+              trackAt(
+                props.subject_tracking.tracks,
+                event.anchor,
+              ).free_zone;
             return (
               <Sequence key={event.event_id} from={from} durationInFrames={duration}>
                 <SemanticCue event={event} accent={props.style.accent} zone={zone} />

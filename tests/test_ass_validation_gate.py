@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 import pytest
@@ -44,3 +44,11 @@ def test_subtitle_overlap_fixture_is_blocked():
 
     assert result["valid"] is False
     assert "TIMING_OVERLAP" in result["issues"]
+
+
+def test_ascii_control_character_is_blocked():
+    with pytest.raises(ValueError, match="ASCII control character"):
+        validate_ass_content(
+            dialogue("Halo " + chr(1) + "c&H00FFFFFF& dunia"),
+            "control-character.ass",
+        )

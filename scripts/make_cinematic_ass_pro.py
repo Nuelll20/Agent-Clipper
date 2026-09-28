@@ -4,8 +4,15 @@ import argparse
 import json
 import math
 import re
+import sys
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from validators.font_validator import assert_required_fonts
 
 import cv2
 import numpy as np
@@ -889,6 +896,10 @@ def create_ass(
     transcript_path: Path,
     output_path: Path,
 ) -> None:
+    assert_required_fonts(
+        PROJECT_ROOT / "fonts" / "font-manifest.json"
+    )
+
     transcript = json.loads(
         transcript_path.read_text(encoding="utf-8-sig")
     )
@@ -966,8 +977,8 @@ def create_ass(
                     after = sanitize_transcript_text(parts[1])
                     main_dialogue = (
                         f"{main_base_override}{before}"
-                        f"{{\1c{accent_col}}}{clean_highlight}"
-                        f"{{\1c{text_col}}}{after}"
+                        rf"{{\1c{accent_col}}}{clean_highlight}"
+                        rf"{{\1c{text_col}}}{after}"
                     )
             else:
                 words = clean_main.split()

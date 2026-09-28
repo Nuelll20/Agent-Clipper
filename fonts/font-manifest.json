@@ -1,4 +1,12 @@
-{
-    "schema_version": "1.0",
-    "fonts": []
+﻿{
+  "schema_version": "1.0",
+  "fonts": [
+    {
+      "family": "Segoe UI Semibold",
+      "required": true,
+      "candidate_files": [
+        "seguisb.ttf"
+      ]
+    }
+  ]
 }

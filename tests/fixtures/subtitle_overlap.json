@@ -1,0 +1,14 @@
+{
+    "segments": [
+        {
+            "start": 0,
+            "end": 3,
+            "text": "Kalimat pertama"
+        },
+        {
+            "start": 2,
+            "end": 5,
+            "text": "Kalimat kedua"
+        }
+    ]
+}

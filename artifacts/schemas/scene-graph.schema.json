@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Scene Graph",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "producer_version",
+    "created_at",
+    "scenes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "producer_version": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "scenes": {
+      "type": "array"
+    }
+  }
+}

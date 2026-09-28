@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Job Manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "producer_version",
+    "source_fingerprint",
+    "config_fingerprint",
+    "created_at",
+    "upstream_artifacts"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "producer_version": {
+      "type": "string"
+    },
+    "source_fingerprint": {
+      "type": "string"
+    },
+    "config_fingerprint": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "upstream_artifacts": {
+      "type": "array"
+    }
+  }
+}

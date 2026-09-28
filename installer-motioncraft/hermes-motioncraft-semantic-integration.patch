@@ -1,0 +1,1514 @@
+diff --git a/motioncraft-renderer/src/hermes/HermesSemanticMotion.tsx b/motioncraft-renderer/src/hermes/HermesSemanticMotion.tsx
+new file mode 100644
+index 0000000..8e3a861
+--- /dev/null
++++ b/motioncraft-renderer/src/hermes/HermesSemanticMotion.tsx
+@@ -0,0 +1,395 @@
++import React from 'react';
++import {
++  AbsoluteFill,
++  Img,
++  OffthreadVideo,
++  Sequence,
++  interpolate,
++  spring,
++  staticFile,
++  useCurrentFrame,
++  useVideoConfig,
++} from 'remotion';
++
++type Zone = 'left' | 'right' | 'top' | 'bottom' | 'center';
++
++type SubjectTrack = {
++  time: number;
++  face: {x: number; y: number; width: number; height: number};
++  free_zone: Zone;
++  detected: boolean;
++};
++
++type SemanticEvent = {
++  event_id: string;
++  segment_id?: string | number;
++  start: number;
++  end: number;
++  anchor: number;
++  intent:
++    | 'warning'
++    | 'metric'
++    | 'question'
++    | 'contrast'
++    | 'process'
++    | 'sequence'
++    | 'reveal'
++    | 'explanation'
++    | 'statement';
++  label: string;
++  strength: number;
++  reason: string;
++  effect: string;
++};
++
++type VisualEvent = {
++  event_id: string;
++  start: number;
++  end: number;
++  type: string;
++  title: string;
++  treatment: 'cutaway' | 'overlay_card' | string;
++  animation: string;
++  asset_src: string;
++  placement_zone?: Zone;
++};
++
++export type HermesMotionProps = {
++  schema_version: number;
++  renderer: string;
++  composition_id: string;
++  width: number;
++  height: number;
++  fps: number;
++  duration: number;
++  duration_in_frames: number;
++  video_src: string;
++  style: {
++    preset: string;
++    accent: string;
++    density: string;
++    placement: string;
++    motion_language: string;
++  };
++  subject_tracking: {
++    source: string;
++    sample_seconds: number;
++    tracks: SubjectTrack[];
++  };
++  semantic_events: SemanticEvent[];
++  visual_events: VisualEvent[];
++  qa: {
++    opening_reserved_until: number;
++    transcript_status: string;
++    transcript_warnings: unknown[];
++    high_risk_word_count: number;
++    do_not_invent_claims: boolean;
++    duplicate_text_overlay: boolean;
++  };
++};
++
++const clamp = (value: number, minimum = 0, maximum = 1) =>
++  Math.min(maximum, Math.max(minimum, value));
++
++const hexToRgba = (hex: string, alpha: number) => {
++  const cleaned = hex.replace('#', '');
++  const normalized = cleaned.length === 6 ? cleaned : '47D7FF';
++  const red = Number.parseInt(normalized.slice(0, 2), 16);
++  const green = Number.parseInt(normalized.slice(2, 4), 16);
++  const blue = Number.parseInt(normalized.slice(4, 6), 16);
++  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
++};
++
++const envelope = (
++  time: number,
++  start: number,
++  end: number,
++  edgeSeconds = 0.22,
++) => {
++  if (time < start || time > end) return 0;
++  const fadeIn = clamp((time - start) / edgeSeconds);
++  const fadeOut = clamp((end - time) / edgeSeconds);
++  return Math.min(fadeIn, fadeOut);
++};
++
++const trackAt = (tracks: SubjectTrack[], time: number): SubjectTrack => {
++  if (!tracks.length) {
++    return {
++      time: 0,
++      face: {x: 0.32, y: 0.16, width: 0.36, height: 0.38},
++      free_zone: 'bottom',
++      detected: false,
++    };
++  }
++  let selected = tracks[0];
++  for (const track of tracks) {
++    if (track.time > time) break;
++    selected = track;
++  }
++  return selected;
++};
++
++const placement = (zone: Zone): React.CSSProperties => {
++  const shared: React.CSSProperties = {
++    position: 'absolute',
++    width: 270,
++    maxWidth: '44%',
++  };
++  if (zone === 'left') return {...shared, left: 38, top: 370};
++  if (zone === 'right') return {...shared, right: 38, top: 370};
++  if (zone === 'top') return {...shared, left: 225, top: 150};
++  if (zone === 'bottom') return {...shared, left: 225, bottom: 245};
++  return {...shared, left: 225, top: 420};
++};
++
++const IntentGlyph: React.FC<{
++  intent: SemanticEvent['intent'];
++  progress: number;
++  accent: string;
++}> = ({intent, progress, accent}) => {
++  if (intent === 'question') {
++    return (
++      <div
++        style={{
++          width: 48,
++          height: 48,
++          borderRadius: 24,
++          border: `2px solid ${accent}`,
++          color: accent,
++          display: 'grid',
++          placeItems: 'center',
++          fontSize: 28,
++          fontWeight: 800,
++          transform: `rotate(${interpolate(progress, [0, 1], [-18, 0])}deg)`,
++        }}
++      >
++        ?
++      </div>
++    );
++  }
++  if (intent === 'process' || intent === 'sequence') {
++    return (
++      <div style={{display: 'flex', alignItems: 'center', gap: 7}}>
++        {[0, 1, 2].map((index) => (
++          <React.Fragment key={index}>
++            <div
++              style={{
++                width: index === 1 ? 15 : 11,
++                height: index === 1 ? 15 : 11,
++                borderRadius: 20,
++                background: progress > index * 0.2 ? accent : 'rgba(255,255,255,.22)',
++                boxShadow:
++                  progress > index * 0.2
++                    ? `0 0 18px ${hexToRgba(accent, 0.55)}`
++                    : 'none',
++              }}
++            />
++            {index < 2 ? (
++              <div
++                style={{
++                  width: 23,
++                  height: 2,
++                  background: hexToRgba(accent, 0.5),
++                }}
++              />
++            ) : null}
++          </React.Fragment>
++        ))}
++      </div>
++    );
++  }
++  if (intent === 'contrast') {
++    return (
++      <div style={{display: 'flex', alignItems: 'center', gap: 9}}>
++        <div style={{width: 21, height: 21, border: `2px solid ${accent}`}} />
++        <div style={{width: 2, height: 33, background: accent}} />
++        <div style={{width: 21, height: 21, background: accent}} />
++      </div>
++    );
++  }
++  return (
++    <div
++      style={{
++        width: 50,
++        height: 6,
++        borderRadius: 8,
++        background: accent,
++        boxShadow: `0 0 22px ${hexToRgba(accent, 0.6)}`,
++        transform: `scaleX(${0.35 + progress * 0.65})`,
++        transformOrigin: 'left center',
++      }}
++    />
++  );
++};
++
++const SemanticCue: React.FC<{
++  event: SemanticEvent;
++  accent: string;
++  zone: Zone;
++}> = ({event, accent, zone}) => {
++  const frame = useCurrentFrame();
++  const {fps, durationInFrames} = useVideoConfig();
++  const enter = spring({
++    frame,
++    fps,
++    config: {damping: 18, stiffness: 150, mass: 0.75},
++    durationInFrames: Math.min(18, durationInFrames),
++  });
++  const exit = interpolate(
++    frame,
++    [Math.max(0, durationInFrames - 10), durationInFrames],
++    [1, 0],
++    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
++  );
++  const direction = zone === 'left' ? -1 : zone === 'right' ? 1 : 0;
++  const opacity = enter * exit;
++  const emphasis = event.intent === 'warning' ? '#FF725E' : accent;
++  return (
++    <div
++      style={{
++        ...placement(zone),
++        opacity,
++        transform: `translate3d(${direction * (1 - enter) * 34}px, ${(1 - enter) * 18}px, 0) scale(${0.96 + enter * 0.04})`,
++        transformOrigin: zone === 'right' ? 'right center' : 'left center',
++        padding: '18px 18px 17px',
++        borderRadius: 24,
++        border: `1px solid ${hexToRgba(emphasis, 0.42)}`,
++        background: 'linear-gradient(145deg, rgba(8,12,20,.82), rgba(14,19,30,.68))',
++        boxShadow: `0 18px 50px rgba(0,0,0,.34), 0 0 34px ${hexToRgba(emphasis, 0.12)}`,
++        backdropFilter: 'blur(12px)',
++        color: '#F8FAFC',
++        fontFamily: 'Inter, Segoe UI, sans-serif',
++      }}
++    >
++      <IntentGlyph intent={event.intent} progress={enter} accent={emphasis} />
++      <div
++        style={{
++          marginTop: 13,
++          fontSize: event.intent === 'metric' ? 29 : 23,
++          lineHeight: 1.08,
++          letterSpacing: 0.45,
++          fontWeight: 750,
++          textTransform: 'uppercase',
++        }}
++      >
++        {event.label}
++      </div>
++    </div>
++  );
++};
++
++const VisualExplainer: React.FC<{event: VisualEvent}> = ({event}) => {
++  const frame = useCurrentFrame();
++  const {fps, durationInFrames} = useVideoConfig();
++  const enter = spring({
++    frame,
++    fps,
++    config: {damping: 20, stiffness: 115, mass: 0.9},
++    durationInFrames: Math.min(22, durationInFrames),
++  });
++  const exit = interpolate(
++    frame,
++    [Math.max(0, durationInFrames - 12), durationInFrames],
++    [1, 0],
++    {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'},
++  );
++  const isCutaway = event.treatment === 'cutaway';
++  const zone = event.placement_zone || 'center';
++  const containedPlacement: React.CSSProperties = isCutaway
++    ? {inset: 0}
++    : zone === 'left'
++      ? {left: -24, top: '12.5%', width: '75%', height: '75%'}
++      : zone === 'right'
++        ? {right: -24, top: '12.5%', width: '75%', height: '75%'}
++        : zone === 'top'
++          ? {left: '10%', top: -70, width: '80%', height: '80%'}
++          : {left: '10%', bottom: -70, width: '80%', height: '80%'};
++  return (
++    <div
++      style={{
++        position: 'absolute',
++        ...containedPlacement,
++        opacity: enter * exit,
++        transform: `translate3d(${(1 - enter) * (isCutaway ? 0 : 38)}px, 0, 0) scale(${isCutaway ? 1.015 - enter * 0.015 : 0.96 + enter * 0.04})`,
++      }}
++    >
++      <Img
++        src={staticFile(event.asset_src)}
++        style={{width: '100%', height: '100%', objectFit: 'contain'}}
++      />
++    </div>
++  );
++};
++
++export const HermesSemanticMotion: React.FC<HermesMotionProps> = (props) => {
++  const frame = useCurrentFrame();
++  const {fps} = useVideoConfig();
++  const time = frame / fps;
++  const activeVisual = props.visual_events.some(
++    (event) => time >= event.start && time <= event.end,
++  );
++  const activeSemantic = props.semantic_events.filter(
++    (event) => time >= event.start && time <= event.end,
++  );
++  const strongest = activeSemantic.sort((a, b) => b.strength - a.strength)[0];
++  const subject = trackAt(props.subject_tracking.tracks, time);
++  const pulse = strongest
++    ? envelope(time, strongest.start, strongest.end) * strongest.strength
++    : 0;
++  const zoom = 1 + pulse * 0.038;
++  const faceCenterX = (subject.face.x + subject.face.width / 2) * 100;
++  const faceCenterY = (subject.face.y + subject.face.height / 2) * 100;
++
++  return (
++    <AbsoluteFill style={{backgroundColor: '#05070B', overflow: 'hidden'}}>
++      <AbsoluteFill
++        style={{
++          transform: `scale(${zoom})`,
++          transformOrigin: `${faceCenterX}% ${faceCenterY}%`,
++          filter: strongest?.intent === 'reveal' ? `saturate(${1 + pulse * 0.1})` : undefined,
++        }}
++      >
++        {props.video_src ? (
++          <OffthreadVideo
++            src={staticFile(props.video_src)}
++            style={{width: '100%', height: '100%', objectFit: 'cover'}}
++          />
++        ) : null}
++      </AbsoluteFill>
++
++      {props.visual_events.map((event) => {
++        const from = Math.max(0, Math.round(event.start * fps));
++        const duration = Math.max(1, Math.round((event.end - event.start) * fps));
++        return (
++          <Sequence key={event.event_id} from={from} durationInFrames={duration}>
++            <VisualExplainer event={event} />
++          </Sequence>
++        );
++      })}
++
++      {!activeVisual
++        ? props.semantic_events.map((event) => {
++            const from = Math.max(0, Math.round(event.start * fps));
++            const duration = Math.max(
++              1,
++              Math.round((event.end - event.start) * fps),
++            );
++            const zone = trackAt(props.subject_tracking.tracks, event.anchor).free_zone;
++            return (
++              <Sequence key={event.event_id} from={from} durationInFrames={duration}>
++                <SemanticCue event={event} accent={props.style.accent} zone={zone} />
++              </Sequence>
++            );
++          })
++        : null}
++
++      <AbsoluteFill
++        style={{
++          pointerEvents: 'none',
++          background:
++            'radial-gradient(circle at 50% 42%, transparent 50%, rgba(0,0,0,.22) 100%)',
++        }}
++      />
++    </AbsoluteFill>
++  );
++};
+diff --git a/motioncraft-renderer/src/hermes/Root.tsx b/motioncraft-renderer/src/hermes/Root.tsx
+new file mode 100644
+index 0000000..4e5cd3b
+--- /dev/null
++++ b/motioncraft-renderer/src/hermes/Root.tsx
+@@ -0,0 +1,72 @@
++import React from 'react';
++import {CalculateMetadataFunction, Composition} from 'remotion';
++import {
++  HermesMotionProps,
++  HermesSemanticMotion,
++} from './HermesSemanticMotion';
++
++const defaultProps: HermesMotionProps = {
++  schema_version: 1,
++  renderer: 'motioncraft-remotion',
++  composition_id: 'HermesSemanticMotion',
++  width: 720,
++  height: 1280,
++  fps: 30,
++  duration: 30,
++  duration_in_frames: 900,
++  video_src: '',
++  style: {
++    preset: 'pi-v2',
++    accent: '#47D7FF',
++    density: 'restrained',
++    placement: 'subject-aware',
++    motion_language: 'cinematic-minimal',
++  },
++  subject_tracking: {
++    source: 'center_fallback',
++    sample_seconds: 0.75,
++    tracks: [
++      {
++        time: 0,
++        face: {x: 0.32, y: 0.16, width: 0.36, height: 0.38},
++        free_zone: 'bottom',
++        detected: false,
++      },
++    ],
++  },
++  semantic_events: [],
++  visual_events: [],
++  qa: {
++    opening_reserved_until: 5.2,
++    transcript_status: 'passed',
++    transcript_warnings: [],
++    high_risk_word_count: 0,
++    do_not_invent_claims: true,
++    duplicate_text_overlay: false,
++  },
++};
++
++const calculateMetadata: CalculateMetadataFunction<HermesMotionProps> = ({
++  props,
++}) => ({
++  durationInFrames: Math.max(
++    1,
++    props.duration_in_frames || Math.ceil(props.duration * props.fps),
++  ),
++  fps: props.fps || 30,
++  width: props.width || 720,
++  height: props.height || 1280,
++});
++
++export const HermesRoot: React.FC = () => (
++  <Composition
++    id="HermesSemanticMotion"
++    component={HermesSemanticMotion}
++    durationInFrames={900}
++    fps={30}
++    width={720}
++    height={1280}
++    defaultProps={defaultProps}
++    calculateMetadata={calculateMetadata}
++  />
++);
+diff --git a/motioncraft-renderer/src/hermes/index.ts b/motioncraft-renderer/src/hermes/index.ts
+new file mode 100644
+index 0000000..8c3b1cf
+--- /dev/null
++++ b/motioncraft-renderer/src/hermes/index.ts
+@@ -0,0 +1,4 @@
++import {registerRoot} from 'remotion';
++import {HermesRoot} from './Root';
++
++registerRoot(HermesRoot);
+diff --git a/scripts/motioncraft_bridge.py b/scripts/motioncraft_bridge.py
+new file mode 100644
+index 0000000..605b11d
+--- /dev/null
++++ b/scripts/motioncraft_bridge.py
+@@ -0,0 +1,641 @@
++#!/usr/bin/env python3
++"""Bridge Hermes transcript intelligence to a dedicated Remotion composition.
++
++Hermes remains the source of truth for clipping, transcript timing, editorial
++selection, campaigns, and approvals. This module turns those decisions into a
++single deterministic motion plan and asks the installed MotionCraft Remotion
++project to render it.
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++import json
++import math
++import re
++import shutil
++import subprocess
++import sys
++from pathlib import Path
++from typing import Any, Iterable
++
++
++SCHEMA_VERSION = 1
++DEFAULT_FPS = 30
++OPENING_RESERVED_UNTIL = 5.2
++INTENT_CUES = {
++    "warning": {"bahaya", "gagal", "jangan", "kebanyakan", "risiko", "masalah"},
++    "reveal": {"akhirnya", "artinya", "jadi", "ternyata"},
++    "process": {"cara", "caranya", "langkah", "pertama", "kedua", "ketiga", "kemudian", "proses"},
++    "contrast": {"tapi", "tetapi", "bukan", "sedangkan", "sementara", "versus"},
++    "explanation": {"karena", "sehingga", "simpelnya", "bekerja", "maksudnya", "penyebab"},
++}
++STOPWORDS = {
++    "ada", "aja", "akan", "atau", "bisa", "buat", "dalam", "dan", "dari", "dengan",
++    "di", "dia", "ini", "itu", "jadi", "juga", "kalau", "karena", "ke", "kita", "lagi",
++    "lebih", "mereka", "oleh", "pada", "saat", "sampai", "saya", "sebagai", "sudah", "tapi",
++    "tetap", "tidak", "untuk", "yang",
++}
++
++
++class MotionCraftBridgeError(RuntimeError):
++    """Expected integration or rendering failure."""
++
++
++def read_json(path: Path) -> Any:
++    if not path.is_file():
++        raise MotionCraftBridgeError(f"File tidak ditemukan: {path}")
++    try:
++        return json.loads(path.read_text(encoding="utf-8-sig"))
++    except json.JSONDecodeError as exc:
++        raise MotionCraftBridgeError(f"JSON tidak valid pada {path.name}: {exc}") from None
++
++
++def write_json(path: Path, payload: Any) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    temporary = path.with_suffix(path.suffix + ".tmp")
++    temporary.write_text(
++        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
++        encoding="utf-8",
++    )
++    temporary.replace(path)
++
++
++def clean_text(value: Any) -> str:
++    return " ".join(str(value or "").split())
++
++
++def spoken_text(segment: dict[str, Any]) -> str:
++    return clean_text(
++        segment.get("text_corrected")
++        or segment.get("text_original")
++        or segment.get("text")
++    )
++
++
++def tokens(value: str) -> list[str]:
++    return [item.casefold() for item in re.findall(r"[0-9A-Za-zÀ-ÿ%]+", value)]
++
++
++def content_label(text: str, maximum: int = 4) -> str:
++    selected: list[str] = []
++    for token in re.findall(r"[0-9A-Za-zÀ-ÿ%]+", text):
++        normalized = token.casefold()
++        if normalized in STOPWORDS or len(normalized) < 3:
++            continue
++        if normalized not in {item.casefold() for item in selected}:
++            selected.append(token)
++        if len(selected) >= maximum:
++            break
++    return " ".join(selected).upper()
++
++
++def intent_label(text: str, intent: str) -> str:
++    raw_words = re.findall(r"[0-9A-Za-zÀ-ÿ%]+", text)
++    cues = INTENT_CUES.get(intent, set())
++    for index, word in enumerate(raw_words):
++        if word.casefold() not in cues:
++            continue
++        window_start = max(0, index - 2)
++        window_end = min(len(raw_words), index + 3)
++        focused = content_label(" ".join(raw_words[window_start:window_end]))
++        if focused:
++            return focused
++    return content_label(text)
++
++
++def normalize_hex(value: Any) -> str | None:
++    text = str(value or "").strip()
++    direct = re.fullmatch(r"#?([0-9A-Fa-f]{6})", text)
++    if direct:
++        return "#" + direct.group(1).upper()
++    ass = re.fullmatch(r"&H(?:[0-9A-Fa-f]{2})?([0-9A-Fa-f]{6})&?", text)
++    if ass:
++        bgr = ass.group(1)
++        return "#" + (bgr[4:6] + bgr[2:4] + bgr[0:2]).upper()
++    return None
++
++
++def choose_accent(
++    subtitle_analysis: dict[str, Any],
++    visual_plan: dict[str, Any],
++) -> str:
++    visual_accent = normalize_hex(visual_plan.get("accent_color"))
++    if visual_accent:
++        return visual_accent
++    counts: dict[str, int] = {}
++    for caption in subtitle_analysis.get("captions") or []:
++        accent = normalize_hex(caption.get("accent_color"))
++        if accent:
++            counts[accent] = counts.get(accent, 0) + 1
++    return max(counts, key=counts.get) if counts else "#47D7FF"
++
++
++def transcript_warnings(transcript: dict[str, Any]) -> list[dict[str, Any]]:
++    warnings: list[dict[str, Any]] = []
++    for segment in transcript.get("segments") or []:
++        for word in segment.get("words") or []:
++            probability = word.get("probability")
++            if probability is None or float(probability) >= 0.68:
++                continue
++            warnings.append(
++                {
++                    "segment_id": segment.get("id"),
++                    "word": clean_text(word.get("word")),
++                    "start": round(float(word.get("start", segment.get("start", 0.0))), 3),
++                    "probability": round(float(probability), 4),
++                    "severity": "review" if float(probability) >= 0.55 else "high",
++                }
++            )
++    return warnings
++
++
++def intent_for_segment(text: str) -> tuple[str, float, str]:
++    token_list = tokens(text)
++    token_set = set(token_list)
++    if re.search(r"(?:\b\d+[.,]?\d*\s*%|\brp\s*\d|\b\d+\s*(?:kali|tahun|hari|jam))", text, re.I):
++        return "metric", 0.92, "number_or_metric"
++    for intent in ("warning", "contrast", "process", "reveal", "explanation"):
++        matched = token_set & INTENT_CUES[intent]
++        if matched:
++            strength = {
++                "warning": 0.94,
++                "contrast": 0.88,
++                "process": 0.84,
++                "reveal": 0.90,
++                "explanation": 0.80,
++            }[intent]
++            return intent, strength, "cue:" + sorted(matched)[0]
++    repeated = [token for token in token_list if token_list.count(token) >= 3 and token not in STOPWORDS]
++    if repeated:
++        return "sequence", 0.82, "spoken_repetition"
++    if "?" in text:
++        return "question", 0.86, "spoken_question"
++    return "statement", 0.42, "neutral_statement"
++
++
++def word_anchor(segment: dict[str, Any], intent: str) -> float:
++    cues = INTENT_CUES.get(intent, set())
++    for word in segment.get("words") or []:
++        word_tokens = set(tokens(str(word.get("word") or "")))
++        if word_tokens & cues or (intent == "metric" and any(token[0].isdigit() for token in word_tokens if token)):
++            return float(word.get("start", segment.get("start", 0.0)))
++    return float(segment.get("start", 0.0))
++
++
++def overlaps(start: float, end: float, ranges: Iterable[tuple[float, float]], margin: float = 0.0) -> bool:
++    return any(end > left - margin and start < right + margin for left, right in ranges)
++
++
++def semantic_events(
++    transcript: dict[str, Any],
++    editorial_plan: dict[str, Any],
++    visual_plan: dict[str, Any],
++    duration: float,
++) -> list[dict[str, Any]]:
++    editorial_ranges = [
++        (float(item.get("start", 0.0)), float(item.get("end", 0.0)))
++        for item in editorial_plan.get("events") or []
++    ]
++    visual_ranges = [
++        (float(item.get("start", 0.0)), float(item.get("end", 0.0)))
++        for item in visual_plan.get("events") or []
++    ]
++    candidates: list[dict[str, Any]] = []
++    for index, segment in enumerate(transcript.get("segments") or [], start=1):
++        text = spoken_text(segment)
++        if not text:
++            continue
++        segment_start = max(0.0, float(segment.get("start", 0.0)))
++        segment_end = min(duration, float(segment.get("end", segment_start)))
++        if segment_end <= OPENING_RESERVED_UNTIL or segment_end - segment_start < 0.6:
++            continue
++        intent, strength, reason = intent_for_segment(text)
++        if intent == "statement":
++            continue
++        anchor = max(OPENING_RESERVED_UNTIL, word_anchor(segment, intent))
++        event_start = max(OPENING_RESERVED_UNTIL, segment_start, anchor - 0.16)
++        span = 1.45 if intent in {"warning", "metric", "reveal"} else 1.9
++        event_end = min(segment_end, event_start + span)
++        if event_end - event_start < 0.55:
++            event_start = max(OPENING_RESERVED_UNTIL, event_end - 0.75)
++        label = intent_label(text, intent)
++        if not label:
++            continue
++        if overlaps(event_start, event_end, visual_ranges, 0.3):
++            strength -= 0.22
++        if overlaps(event_start, event_end, editorial_ranges, 0.2):
++            reason += "+editorial_emphasis"
++            strength += 0.06
++        candidates.append(
++            {
++                "event_id": f"semantic-{index:02d}",
++                "segment_id": segment.get("id", index),
++                "start": round(event_start, 3),
++                "end": round(event_end, 3),
++                "anchor": round(anchor, 3),
++                "intent": intent,
++                "label": label[:52],
++                "strength": round(min(1.0, max(0.0, strength)), 3),
++                "reason": reason,
++                "effect": {
++                    "warning": "focus-pulse",
++                    "metric": "number-chip",
++                    "question": "question-orbit",
++                    "contrast": "split-line",
++                    "process": "step-dots",
++                    "sequence": "step-dots",
++                    "reveal": "soft-reveal",
++                    "explanation": "concept-link",
++                }.get(intent, "soft-reveal"),
++            }
++        )
++
++    selected: list[dict[str, Any]] = []
++    for candidate in sorted(candidates, key=lambda item: float(item["strength"]), reverse=True):
++        center = (float(candidate["start"]) + float(candidate["end"])) / 2.0
++        if any(abs(center - (float(item["start"]) + float(item["end"])) / 2.0) < 2.4 for item in selected):
++            continue
++        selected.append(candidate)
++        if len(selected) >= max(2, min(7, math.ceil(duration / 8.0))):
++            break
++    return sorted(selected, key=lambda item: float(item["start"]))
++
++
++def caption_zone_at(subtitle_analysis: dict[str, Any], timestamp: float) -> str | None:
++    for caption in subtitle_analysis.get("captions") or []:
++        if float(caption.get("start", 0.0)) <= timestamp <= float(caption.get("end", 0.0)):
++            value = str(caption.get("position") or "").casefold()
++            return {"atas": "top", "tengah": "center", "bawah": "bottom"}.get(value, value or None)
++    return None
++
++
++def preferred_zone(face: dict[str, float], avoid: str | None) -> str:
++    center_x = face["x"] + face["width"] / 2.0
++    center_y = face["y"] + face["height"] / 2.0
++    if center_x < 0.43:
++        zone = "right"
++    elif center_x > 0.57:
++        zone = "left"
++    elif center_y < 0.48:
++        zone = "bottom"
++    else:
++        zone = "top"
++    if zone == avoid:
++        alternatives = {
++            "top": "right" if center_x < 0.5 else "left",
++            "bottom": "right" if center_x < 0.5 else "left",
++            "left": "top" if center_y > 0.5 else "bottom",
++            "right": "top" if center_y > 0.5 else "bottom",
++        }
++        zone = alternatives[zone]
++    return zone
++
++
++def layout_zone_at(tracks: list[dict[str, Any]], timestamp: float) -> str:
++    if not tracks:
++        return "bottom"
++    selected = tracks[0]
++    for track in tracks:
++        if float(track.get("time", 0.0)) > timestamp:
++            break
++        selected = track
++    return str(selected.get("free_zone") or "bottom")
++
++
++def analyze_subject_layout(
++    video: Path,
++    duration: float,
++    subtitle_analysis: dict[str, Any],
++    sample_seconds: float = 0.75,
++) -> tuple[list[dict[str, Any]], str]:
++    fallback_face = {"x": 0.32, "y": 0.16, "width": 0.36, "height": 0.38}
++    try:
++        import cv2  # type: ignore
++    except Exception:
++        return [
++            {
++                "time": 0.0,
++                "face": fallback_face,
++                "free_zone": preferred_zone(fallback_face, caption_zone_at(subtitle_analysis, 0.0)),
++                "detected": False,
++            }
++        ], "center_fallback"
++
++    cascade_path = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
++    detector = cv2.CascadeClassifier(str(cascade_path))
++    capture = cv2.VideoCapture(str(video))
++    if detector.empty() or not capture.isOpened():
++        if capture.isOpened():
++            capture.release()
++        return [{"time": 0.0, "face": fallback_face, "free_zone": "bottom", "detected": False}], "center_fallback"
++
++    tracks: list[dict[str, Any]] = []
++    previous = fallback_face
++    detected_count = 0
++    sample_count = max(1, int(math.ceil(duration / sample_seconds)))
++    try:
++        for index in range(sample_count):
++            timestamp = min(duration, index * sample_seconds)
++            capture.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000.0)
++            ok, frame = capture.read()
++            detected = False
++            face = previous
++            if ok and frame is not None:
++                height, width = frame.shape[:2]
++                scale = min(1.0, 640.0 / max(width, height))
++                working = cv2.resize(frame, None, fx=scale, fy=scale) if scale < 1.0 else frame
++                gray = cv2.cvtColor(working, cv2.COLOR_BGR2GRAY)
++                faces = detector.detectMultiScale(gray, scaleFactor=1.11, minNeighbors=5, minSize=(34, 34))
++                if len(faces):
++                    x, y, fw, fh = max(faces, key=lambda rect: int(rect[2]) * int(rect[3]))
++                    wh, ww = gray.shape[:2]
++                    face = {
++                        "x": round(float(x) / ww, 4),
++                        "y": round(float(y) / wh, 4),
++                        "width": round(float(fw) / ww, 4),
++                        "height": round(float(fh) / wh, 4),
++                    }
++                    previous = face
++                    detected = True
++                    detected_count += 1
++            tracks.append(
++                {
++                    "time": round(timestamp, 3),
++                    "face": face,
++                    "free_zone": preferred_zone(face, caption_zone_at(subtitle_analysis, timestamp)),
++                    "detected": detected,
++                }
++            )
++    finally:
++        capture.release()
++    source = "face_tracking" if detected_count else "center_fallback"
++    return tracks, source
++
++
++def normalize_visual_events(visual_plan: dict[str, Any], duration: float) -> list[dict[str, Any]]:
++    output: list[dict[str, Any]] = []
++    for index, item in enumerate(visual_plan.get("events") or [], start=1):
++        start = max(OPENING_RESERVED_UNTIL, float(item.get("start", 0.0)))
++        end = min(duration, float(item.get("end", start)))
++        asset_path = str(item.get("asset_path") or "").strip()
++        if end - start < 0.5 or not asset_path:
++            continue
++        output.append(
++            {
++                "event_id": str(item.get("event_id") or f"visual-{index:02d}"),
++                "start": round(start, 3),
++                "end": round(end, 3),
++                "type": str(item.get("type") or "concept"),
++                "title": clean_text(item.get("title"))[:80],
++                "treatment": str(item.get("treatment") or "overlay_card"),
++                "animation": str(item.get("animation") or "slide"),
++                "asset_path": str(Path(asset_path).expanduser().resolve()),
++            }
++        )
++    return output
++
++
++def build_motion_plan(
++    video: Path,
++    transcript: dict[str, Any],
++    editorial_plan: dict[str, Any],
++    visual_plan: dict[str, Any],
++    subtitle_analysis: dict[str, Any],
++    *,
++    fps: int = DEFAULT_FPS,
++) -> dict[str, Any]:
++    duration = float(transcript.get("duration") or editorial_plan.get("duration") or visual_plan.get("duration") or 0.0)
++    if duration <= 0:
++        raise MotionCraftBridgeError("Durasi klip tidak valid pada transkrip/rencana.")
++    warnings = transcript_warnings(transcript)
++    subject_tracks, tracking_source = analyze_subject_layout(video, duration, subtitle_analysis)
++    visual_events = normalize_visual_events(visual_plan, duration)
++    for event in visual_events:
++        midpoint = (float(event["start"]) + float(event["end"])) / 2.0
++        event["placement_zone"] = (
++            "center"
++            if str(event.get("treatment")) == "cutaway"
++            else layout_zone_at(subject_tracks, midpoint)
++        )
++    return {
++        "schema_version": SCHEMA_VERSION,
++        "renderer": "motioncraft-remotion",
++        "composition_id": "HermesSemanticMotion",
++        "width": 720,
++        "height": 1280,
++        "fps": fps,
++        "duration": round(duration, 3),
++        "duration_in_frames": max(1, math.ceil(duration * fps)),
++        "style": {
++            "preset": "pi-v2",
++            "accent": choose_accent(subtitle_analysis, visual_plan),
++            "density": "restrained",
++            "placement": "subject-aware",
++            "motion_language": "cinematic-minimal",
++        },
++        "subject_tracking": {
++            "source": tracking_source,
++            "sample_seconds": 0.75,
++            "tracks": subject_tracks,
++        },
++        "semantic_events": semantic_events(transcript, editorial_plan, visual_plan, duration),
++        "visual_events": visual_events,
++        "qa": {
++            "opening_reserved_until": OPENING_RESERVED_UNTIL,
++            "transcript_status": "review" if warnings else "passed",
++            "transcript_warnings": warnings,
++            "high_risk_word_count": sum(1 for item in warnings if item["severity"] == "high"),
++            "do_not_invent_claims": True,
++            "duplicate_text_overlay": False,
++        },
++    }
++
++
++def safe_name(value: str) -> str:
++    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip("-.")
++    return cleaned[:70] or "clip"
++
++
++def copy_asset(source: Path, target: Path) -> None:
++    if not source.is_file():
++        raise MotionCraftBridgeError(f"Aset MotionCraft tidak ditemukan: {source}")
++    target.parent.mkdir(parents=True, exist_ok=True)
++    shutil.copy2(source, target)
++
++
++def remotion_executable(renderer: Path) -> Path:
++    suffix = ".cmd" if sys.platform.startswith("win") else ""
++    executable = renderer / "node_modules" / ".bin" / f"remotion{suffix}"
++    if not executable.is_file():
++        raise MotionCraftBridgeError(
++            f"Remotion lokal tidak ditemukan: {executable}. Jalankan npm install di {renderer}."
++        )
++    return executable
++
++
++def verify_renderer(renderer: Path) -> None:
++    required = [
++        renderer / "package.json",
++        renderer / "src" / "hermes" / "index.ts",
++        renderer / "src" / "hermes" / "HermesSemanticMotion.tsx",
++    ]
++    missing = [str(path) for path in required if not path.is_file()]
++    if missing:
++        raise MotionCraftBridgeError("File renderer belum lengkap: " + ", ".join(missing))
++    remotion_executable(renderer)
++
++
++def stage_props(
++    renderer: Path,
++    video: Path,
++    plan: dict[str, Any],
++    plan_output: Path,
++) -> Path:
++    digest = hashlib.sha256((str(video.resolve()) + str(plan_output.resolve())).encode("utf-8")).hexdigest()[:10]
++    run_name = safe_name(plan_output.parent.name) + "-" + digest
++    public_root = renderer / "public" / "hermes" / run_name
++    public_root.mkdir(parents=True, exist_ok=True)
++    video_target = public_root / ("source" + video.suffix.casefold())
++    copy_asset(video, video_target)
++
++    props = json.loads(json.dumps(plan))
++    props["video_src"] = video_target.relative_to(renderer / "public").as_posix()
++    for index, event in enumerate(props.get("visual_events") or [], start=1):
++        source = Path(str(event.pop("asset_path"))).expanduser()
++        extension = source.suffix.casefold() or ".png"
++        target = public_root / "visuals" / f"{safe_name(str(event.get('event_id') or index))}{extension}"
++        copy_asset(source, target)
++        event["asset_src"] = target.relative_to(renderer / "public").as_posix()
++    props_path = plan_output.with_suffix(".remotion-props.json")
++    write_json(props_path, props)
++    return props_path
++
++
++def render_plan(
++    renderer: Path,
++    video: Path,
++    plan: dict[str, Any],
++    plan_output: Path,
++    output: Path,
++) -> None:
++    verify_renderer(renderer)
++    props_path = stage_props(renderer, video, plan, plan_output)
++    output.parent.mkdir(parents=True, exist_ok=True)
++    command = [
++        str(remotion_executable(renderer)),
++        "render",
++        "src/hermes/index.ts",
++        "HermesSemanticMotion",
++        str(output.resolve()),
++        f"--props={props_path.resolve()}",
++        "--codec=h264",
++        "--audio-codec=aac",
++        "--pixel-format=yuv420p",
++        "--crf=18",
++        "--concurrency=4",
++    ]
++    result = subprocess.run(
++        command,
++        cwd=str(renderer),
++        check=False,
++        text=True,
++        encoding="utf-8",
++        errors="replace",
++        stdout=subprocess.PIPE,
++        stderr=subprocess.STDOUT,
++    )
++    if result.returncode != 0:
++        raise MotionCraftBridgeError("Render Remotion gagal:\n" + (result.stdout or "")[-6000:])
++    if not output.is_file() or output.stat().st_size == 0:
++        raise MotionCraftBridgeError("Remotion selesai tanpa video output yang valid.")
++
++
++def command_plan(args: argparse.Namespace) -> int:
++    video = Path(args.video).expanduser().resolve()
++    transcript = read_json(Path(args.transcript).expanduser().resolve())
++    editorial_plan = read_json(Path(args.editorial_plan).expanduser().resolve())
++    visual_plan = read_json(Path(args.visual_plan).expanduser().resolve())
++    subtitle_analysis = read_json(Path(args.subtitle_analysis).expanduser().resolve())
++    plan = build_motion_plan(video, transcript, editorial_plan, visual_plan, subtitle_analysis, fps=args.fps)
++    if args.strict_transcript and int(plan["qa"]["high_risk_word_count"]) > 0:
++        raise MotionCraftBridgeError(
++            "Transkrip memiliki kata berisiko tinggi. Tinjau qa.transcript_warnings sebelum render."
++        )
++    output = Path(args.output).expanduser().resolve()
++    write_json(output, plan)
++    print("Motion plan selesai.")
++    print(f"Semantic events : {len(plan['semantic_events'])}")
++    print(f"Visual events   : {len(plan['visual_events'])}")
++    print(f"Transcript QA   : {plan['qa']['transcript_status']}")
++    print(f"Output          : {output}")
++    return 0
++
++
++def command_render(args: argparse.Namespace) -> int:
++    plan_args = argparse.Namespace(**vars(args))
++    command_plan(plan_args)
++    plan_path = Path(args.output).expanduser().resolve()
++    plan = read_json(plan_path)
++    render_output = Path(args.render_output).expanduser().resolve()
++    render_plan(
++        Path(args.renderer).expanduser().resolve(),
++        Path(args.video).expanduser().resolve(),
++        plan,
++        plan_path,
++        render_output,
++    )
++    print("MotionCraft render selesai.")
++    print(f"Video           : {render_output}")
++    return 0
++
++
++def command_doctor(args: argparse.Namespace) -> int:
++    renderer = Path(args.renderer).expanduser().resolve()
++    verify_renderer(renderer)
++    print("MotionCraft bridge: siap")
++    print(f"Renderer          : {renderer}")
++    print(f"Remotion          : {remotion_executable(renderer)}")
++    return 0
++
++
++def add_plan_arguments(parser: argparse.ArgumentParser) -> None:
++    parser.add_argument("--video", required=True)
++    parser.add_argument("--transcript", required=True)
++    parser.add_argument("--editorial-plan", required=True)
++    parser.add_argument("--visual-plan", required=True)
++    parser.add_argument("--subtitle-analysis", required=True)
++    parser.add_argument("--output", required=True, help="motion-plan.json")
++    parser.add_argument("--fps", type=int, default=DEFAULT_FPS)
++    parser.add_argument("--strict-transcript", action="store_true")
++
++
++def build_parser() -> argparse.ArgumentParser:
++    parser = argparse.ArgumentParser(description="Jembatan semantik Hermes ke MotionCraft Remotion.")
++    subparsers = parser.add_subparsers(dest="command", required=True)
++    plan = subparsers.add_parser("plan", help="Buat motion-plan.json tanpa render")
++    add_plan_arguments(plan)
++    plan.set_defaults(handler=command_plan)
++    render = subparsers.add_parser("render", help="Buat motion plan dan render Remotion")
++    add_plan_arguments(render)
++    render.add_argument("--renderer", required=True)
++    render.add_argument("--render-output", required=True)
++    render.set_defaults(handler=command_render)
++    doctor = subparsers.add_parser("doctor", help="Periksa bridge dan renderer")
++    doctor.add_argument("--renderer", required=True)
++    doctor.set_defaults(handler=command_doctor)
++    return parser
++
++
++def main() -> int:
++    args = build_parser().parse_args()
++    return int(args.handler(args) or 0)
++
++
++if __name__ == "__main__":
++    try:
++        raise SystemExit(main())
++    except MotionCraftBridgeError as exc:
++        print(f"ERROR: {exc}", file=sys.stderr)
++        raise SystemExit(1) from exc
+diff --git a/scripts/podcast_clipper.py b/scripts/podcast_clipper.py
+index db930e5..b30d385 100644
+--- a/scripts/podcast_clipper.py
++++ b/scripts/podcast_clipper.py
+@@ -48,6 +48,15 @@ def default_jobs_root() -> Path:
+     return Path(configured).expanduser() if configured else project_root() / "jobs"
+ 
+ 
++def default_motioncraft_renderer() -> Path:
++    configured = os.environ.get("HERMES_MOTIONCRAFT_RENDERER", "").strip()
++    return (
++        Path(configured).expanduser()
++        if configured
++        else project_root() / "motioncraft-renderer"
++    )
++
++
+ def listener_state_path() -> Path:
+     return project_root() / "state" / "telegram-listener.json"
+ 
+@@ -386,6 +395,31 @@ def normalize_headline(raw: Any, hook: str, clip_id: str) -> dict[str, Any]:
+     }
+ 
+ 
++def normalize_motioncraft(raw: Any, clip_id: str) -> dict[str, Any]:
++    if raw is None:
++        raw = {"mode": "auto"}
++    elif isinstance(raw, bool):
++        raw = {"mode": "on" if raw else "off"}
++    elif isinstance(raw, str):
++        raw = {"mode": raw}
++    if not isinstance(raw, dict):
++        raise WorkflowError(
++            f"{clip_id}.motioncraft harus berupa auto/on/off atau object."
++        )
++    mode = str(raw.get("mode") or "auto").casefold()
++    if mode not in {"auto", "on", "off"}:
++        raise WorkflowError(
++            f"{clip_id}.motioncraft.mode harus auto, on, atau off."
++        )
++    renderer_value = str(raw.get("renderer") or "").strip()
++    return {
++        **raw,
++        "mode": mode,
++        "renderer": renderer_value,
++        "strict_transcript": bool(raw.get("strict_transcript", False)),
++    }
++
++
+ def validate_plan(plan: Any, source_duration: float | None = None) -> dict[str, Any]:
+     if not isinstance(plan, dict):
+         raise WorkflowError("Root clip-plan.json harus berupa object.")
+@@ -422,6 +456,7 @@ def validate_plan(plan: Any, source_duration: float | None = None) -> dict[str,
+             raise WorkflowError(f"Hook {clip_id} terlalu panjang; maksimal 12 kata.")
+ 
+         headline = normalize_headline(raw.get("headline"), hook, clip_id)
++        motioncraft = normalize_motioncraft(raw.get("motioncraft"), clip_id)
+         cinematic_focus = str(raw.get("cinematic_focus") or "dramatic").casefold()
+         if cinematic_focus not in {"off", "subtle", "dramatic"}:
+             raise WorkflowError(
+@@ -453,6 +488,7 @@ def validate_plan(plan: Any, source_duration: float | None = None) -> dict[str,
+                 "hashtags": [str(item).strip() for item in hashtags if str(item).strip()],
+                 "focus": focus,
+                 "headline": headline,
++                "motioncraft": motioncraft,
+                 "cinematic_focus": cinematic_focus,
+                 "cinematic_side": cinematic_side,
+             }
+@@ -979,6 +1015,8 @@ def render_one_clip(
+     caption_path = clip_dir / "caption.txt"
+     campaign_applied = clip_dir / "campaign-applied.json"
+     campaign_compliance = clip_dir / "campaign-compliance.json"
++    motion_plan = clip_dir / "motion-plan.json"
++    motioncraft_video = clip_dir / "clip-motioncraft.mp4"
+ 
+     print(f"\n[{clip['id']}] Memotong dan membuat framing vertikal...")
+     cut_details = cut_vertical_clip(
+@@ -1124,6 +1162,90 @@ def render_one_clip(
+             "dengan visual cutaway."
+         )
+ 
++    motioncraft_config = clip.get("motioncraft") or {"mode": "auto"}
++    motioncraft_mode = str(motioncraft_config.get("mode") or "auto")
++    configured_renderer = str(motioncraft_config.get("renderer") or "").strip()
++    motioncraft_renderer = (
++        Path(configured_renderer).expanduser().resolve()
++        if configured_renderer
++        else default_motioncraft_renderer().resolve()
++    )
++    motioncraft_rendered = False
++    motioncraft_error: str | None = None
++    motion_input_video = raw_video
++    if motioncraft_mode != "off":
++        bridge = require_file(
++            scripts_root() / "motioncraft_bridge.py",
++            "MotionCraft bridge",
++        )
++        renderer_available = (
++            (motioncraft_renderer / "package.json").is_file()
++            and (motioncraft_renderer / "node_modules").is_dir()
++            and (motioncraft_renderer / "src" / "hermes" / "index.ts").is_file()
++        )
++        if not renderer_available and motioncraft_mode == "on":
++            raise WorkflowError(
++                "MotionCraft diwajibkan tetapi renderer belum siap: "
++                f"{motioncraft_renderer}"
++            )
++        if renderer_available:
++            print(f"[{clip['id']}] Merender motion semantik dengan MotionCraft...")
++            motioncraft_command = [
++                python,
++                str(bridge),
++                "render",
++                "--video",
++                str(raw_video),
++                "--transcript",
++                str(clip_transcript),
++                "--editorial-plan",
++                str(editorial_plan),
++                "--visual-plan",
++                str(visual_plan),
++                "--subtitle-analysis",
++                str(subtitle_analysis),
++                "--output",
++                str(motion_plan),
++                "--renderer",
++                str(motioncraft_renderer),
++                "--render-output",
++                str(motioncraft_video),
++            ]
++            if bool(motioncraft_config.get("strict_transcript", False)):
++                motioncraft_command.append("--strict-transcript")
++            try:
++                run_command(motioncraft_command)
++                motioncraft_rendered = True
++                motion_input_video = motioncraft_video
++                edit_payload = read_json(edit_plan)
++                legacy_motion = list(edit_payload.get("video_motion") or [])
++                edit_payload["motioncraft"] = {
++                    "enabled": True,
++                    "renderer": str(motioncraft_renderer),
++                    "motion_plan": str(motion_plan),
++                    "legacy_video_motion": legacy_motion,
++                }
++                edit_payload["video_motion"] = []
++                write_json(edit_plan, edit_payload)
++                visual_payload = read_json(visual_plan)
++                visual_payload["renderer"] = "motioncraft-remotion"
++                write_json(visual_plan, visual_payload)
++            except WorkflowError as exc:
++                motioncraft_error = str(exc)
++                if motioncraft_mode == "on":
++                    raise
++                print(
++                    f"[{clip['id']}] MotionCraft auto gagal; memakai renderer "
++                    f"FFmpeg lama. Detail: {motioncraft_error}",
++                    file=sys.stderr,
++                )
++        elif motioncraft_mode == "auto":
++            motioncraft_error = f"Renderer belum siap: {motioncraft_renderer}"
++            print(
++                f"[{clip['id']}] MotionCraft auto dilewati; {motioncraft_error}",
++                file=sys.stderr,
++            )
++
+     print(f"[{clip['id']}] Menambahkan spotlight text...")
+     run_command(
+         [
+@@ -1164,7 +1286,7 @@ def render_one_clip(
+         [
+             python,
+             str(require_file(scripts_root() / "render_editorial_pro.py", "Editorial renderer")),
+-            str(raw_video),
++            str(motion_input_video),
+             str(render_subtitle),
+             str(edit_plan),
+             str(editorial_plan),
+@@ -1283,6 +1405,11 @@ def render_one_clip(
+         "visual_style": visual_style,
+         "visual_event_count": len(visual_payload.get("events") or []),
+         "visual_plan": str(visual_plan.resolve()),
++        "motioncraft_mode": motioncraft_mode,
++        "motioncraft_rendered": motioncraft_rendered,
++        "motioncraft_renderer": str(motioncraft_renderer),
++        "motion_plan": str(motion_plan.resolve()) if motion_plan.is_file() else None,
++        "motioncraft_error": motioncraft_error,
+         "campaign_enabled": campaign_path is not None,
+         "campaign_id": campaign_report.get("campaign_id") if campaign_report else None,
+         "campaign_compliance": str(campaign_compliance.resolve()) if campaign_report else None,
+@@ -1568,6 +1695,7 @@ def command_doctor(_: argparse.Namespace) -> int:
+         (scripts_root() / "render_editorial_pro.py", "Editorial renderer"),
+         (scripts_root() / "visual_explainer_pro.py", "Visual explainer"),
+         (scripts_root() / "campaign_pro.py", "Campaign engine"),
++        (scripts_root() / "motioncraft_bridge.py", "MotionCraft bridge"),
+     ]
+     for path, label in checks:
+         require_file(path, label)
+@@ -1580,6 +1708,25 @@ def command_doctor(_: argparse.Namespace) -> int:
+     print("Script pipeline lengkap: True")
+     print("FFmpeg/FFprobe siap: True")
+     print(f"yt-dlp siap: True ({version})")
++    renderer = default_motioncraft_renderer().resolve()
++    if (renderer / "package.json").is_file():
++        result = run_command(
++            [
++                sys.executable,
++                str(scripts_root() / "motioncraft_bridge.py"),
++                "doctor",
++                "--renderer",
++                str(renderer),
++            ],
++            capture=True,
++            check=False,
++        )
++        if result.stdout:
++            print(result.stdout.rstrip())
++        if result.returncode != 0:
++            raise WorkflowError("MotionCraft renderer terdeteksi tetapi pemeriksaan gagal.")
++    else:
++        print(f"MotionCraft bridge: fallback aktif (renderer belum ada di {renderer})")
+     return delegate_approval(["doctor"])
+ 
+ 
+diff --git a/scripts/render_editorial_pro.py b/scripts/render_editorial_pro.py
+index fb20392..7037927 100644
+--- a/scripts/render_editorial_pro.py
++++ b/scripts/render_editorial_pro.py
+@@ -103,6 +103,21 @@ def valid_sfx_events(plan: dict[str, Any]) -> list[dict[str, Any]]:
+     return events
+ 
+ 
++def merge_sfx_events(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    """Keep semantic and visual accents without stacking sounds on one beat."""
++    merged: list[dict[str, Any]] = []
++    for event in sorted(
++        (item for group in groups for item in group),
++        key=lambda item: float(item["start"]),
++    ):
++        if any(abs(float(event["start"]) - float(item["start"])) < 0.18 for item in merged):
++            continue
++        merged.append(event)
++        if len(merged) >= 8:
++            break
++    return merged
++
++
+ def build_filter_complex(
+     video_filter: str,
+     edit_plan: dict[str, Any],
+@@ -178,10 +193,16 @@ def render(
+     editorial_plan_path: Path,
+     output: Path,
+     sfx_root: Path,
++    visual_plan_path: Path | None = None,
+ ) -> None:
+     edit_plan = json.loads(edit_plan_path.read_text(encoding="utf-8-sig"))
+     editorial_plan = json.loads(editorial_plan_path.read_text(encoding="utf-8-sig"))
+-    events = valid_sfx_events(editorial_plan)
++    editorial_events = valid_sfx_events(editorial_plan)
++    visual_events: list[dict[str, Any]] = []
++    if visual_plan_path is not None and visual_plan_path.is_file():
++        visual_plan = json.loads(visual_plan_path.read_text(encoding="utf-8-sig"))
++        visual_events = valid_sfx_events(visual_plan)
++    events = merge_sfx_events(editorial_events, visual_events)
+     ffmpeg = base.require_program("ffmpeg")
+     ffprobe = base.require_program("ffprobe")
+     duration = base.probe_duration(ffprobe, video)
+@@ -255,6 +276,7 @@ def main() -> None:
+         args.editorial_plan.resolve(),
+         args.output.resolve(),
+         args.sfx_root.resolve(),
++        args.visual_plan.resolve() if args.visual_plan else None,
+     )
+ 
+ 
+diff --git a/skills/podcast-video-clipper/SKILL.md b/skills/podcast-video-clipper/SKILL.md
+index 73a137d..cf5bb5d 100644
+--- a/skills/podcast-video-clipper/SKILL.md
++++ b/skills/podcast-video-clipper/SKILL.md
+@@ -1,6 +1,6 @@
+ ---
+ name: podcast-video-clipper
+-description: Gunakan untuk mengubah link podcast atau video panjang menjadi klip vertikal profesional dengan cinematic focus matte, headline open-loop, highlight nama tokoh, subtitle, spotlight text, SFX, visual explainer pada footage plain, Campaign Mode, pemeriksaan kepatuhan, dan persetujuan Telegram sebelum publikasi.
++description: Gunakan untuk mengubah link podcast atau video panjang menjadi klip vertikal profesional dengan motion semantik MotionCraft/Remotion yang mengikuti ucapan dan ruang kosong di sekitar subjek, cinematic focus, headline, subtitle, SFX, visual explainer, Campaign Mode, pemeriksaan kepatuhan, dan persetujuan Telegram sebelum publikasi.
+ ---
+ 
+ # Podcast Video Clipper
+@@ -29,6 +29,8 @@ PYTHON="D:/Hermes/video-agent/.venv/Scripts/python.exe"
+ CLIPPER="D:/Hermes/video-agent/scripts/podcast_clipper.py"
+ CAMPAIGN_ENGINE="D:/Hermes/video-agent/scripts/campaign_pro.py"
+ VISUAL_ENGINE="D:/Hermes/video-agent/scripts/visual_explainer_pro.py"
++MOTIONCRAFT_BRIDGE="D:/Hermes/video-agent/scripts/motioncraft_bridge.py"
++MOTIONCRAFT_RENDERER="D:/Hermes/video-agent/motioncraft-renderer"
+ ```
+ 
+ Jangan mengganti atau menulis token Telegram ke file skill, rencana klip, log, atau jawaban chat. Token hanya boleh berada di `D:/Hermes/.env`.
+@@ -222,6 +224,10 @@ Edit template rencana yang dibuat pada folder job. Gunakan struktur berikut:
+       "cinematic_side": "both",
+       "editorial_style": "balanced",
+       "visual_style": "immersive",
++      "motioncraft": {
++        "mode": "auto",
++        "strict_transcript": false
++      },
+       "brief_points": ["problem"]
+     }
+   ]
+@@ -246,6 +252,8 @@ Aturan field:
+ - `cinematic_side`: gunakan `both` untuk fokus simetris, `left` atau `right` jika hanya satu sisi perlu ditutup, atau `auto` agar sisi berlawanan dari posisi subjek dipilih.
+ - `editorial_style`: gunakan `subtle`, `balanced`, `energetic`, atau `off`. Gunakan `balanced` secara default.
+ - `visual_style`: gunakan `subtle`, `balanced`, `immersive`, atau `off`. Gunakan `immersive` jika pengguna meminta gaya visual seperti video referensi; gunakan `balanced` untuk hasil umum.
++- `motioncraft.mode`: gunakan `auto` secara default, `on` untuk hard requirement, atau `off` untuk renderer FFmpeg lama. Mode `auto` memakai MotionCraft jika renderer sehat dan jatuh kembali ke FFmpeg apabila renderer tidak tersedia.
++- `motioncraft.strict_transcript`: gunakan `true` jika setiap kata berprobabilitas rendah harus menghentikan render. Default `false` tetap membuat daftar peringatan di `motion-plan.json` tanpa mengarang koreksi.
+ - `campaign_path`: hapus field ini untuk pekerjaan non-campaign; gunakan path absolut atau path relatif terhadap `clip-plan.json` untuk Campaign Mode.
+ - `brief_points`: daftar ID poin brief yang memang ditemukan dalam rentang ucapan klip tersebut. Jangan menandai poin hanya karena dibutuhkan campaign.
+ 
+@@ -338,6 +346,37 @@ sendiri atau gambar AI yang sudah dibuat. Path relatif dihitung dari folder job.
+ Tanpa `asset_path`, engine membuat motion graphic lokal secara otomatis. Untuk
+ revisi, ubah hanya event yang bermasalah lalu render ulang klip terkait.
+ 
++### MotionCraft semantik dan subject-aware
++
++Jangan meminta MotionCraft menebak isi ucapan dari video untuk kedua kalinya.
++Hermes adalah sumber kebenaran untuk transkrip dan pilihan editorial. Bridge
++menggabungkan `transcript.json`, `editorial-plan.json`, `visual-plan.json`, dan
++`subtitle.analysis.json` menjadi `motion-plan.json` dengan timestamp relatif
++terhadap klip.
++
++Aturan integrasi:
++
++1. Kaitkan motion ke intent ucapan: pertanyaan, peringatan, kontras, urutan,
++   angka, reveal, atau penjelasan. Jangan memberi animasi generik pada setiap kata.
++2. Gunakan timestamp kata sebagai anchor jika tersedia; gunakan awal segmen hanya
++   sebagai fallback.
++3. Gunakan face tracking untuk memilih `left`, `right`, `top`, atau `bottom`
++   sebagai ruang bebas. Hindari zona subtitle aktif.
++4. Pertahankan 5,2 detik pertama untuk headline. Jangan menambah cue semantik atau
++   visual cutaway pada rentang tersebut.
++5. Animasikan aset dari `visual-plan.json` di Remotion. Subtitle dan spotlight
++   tetap dirender sesudahnya oleh ASS agar keterbacaan dan Campaign Mode tidak berubah.
++6. Setelah MotionCraft melakukan zoom/push, kosongkan `video_motion` lama pada
++   edit plan agar tidak terjadi double zoom.
++7. Simpan kata berprobabilitas rendah di `motion-plan.json > qa` dan jangan
++   mengubahnya tanpa konteks yang kuat.
++
++Untuk memeriksa bridge secara langsung:
++
++```bash
++"$PYTHON" "$MOTIONCRAFT_BRIDGE" doctor --renderer "$MOTIONCRAFT_RENDERER"
++```
++
+ ### 7. Validasi rencana
+ 
+ ```bash
+@@ -368,7 +407,7 @@ Jangan memulai listener kedua jika statusnya sudah aktif. Jika muncul konflik `g
+ "$PYTHON" "$CLIPPER" render --plan "PATH_CLIP_PLAN" --continue-on-error
+ ```
+ 
+-Pipeline akan melakukan crop vertikal berbasis wajah, memberi cinematic focus matte, membuat headline open-loop dan subtitle dinamis, menganalisis kepadatan edit, menambahkan spotlight text, membuat visual explainer pada rentang plain, memberi SFX halus, menormalkan audio, memasang aset campaign, membuat caption, menjalankan compliance gate, lalu mengirim hasil yang lulus ke Telegram.
++Pipeline akan melakukan crop vertikal berbasis wajah, membuat motion plan dari makna ucapan, merender cue dan visual explainer dengan MotionCraft/Remotion di ruang bebas sekitar subjek, memberi cinematic focus matte, membuat headline dan subtitle dinamis, menambahkan spotlight text serta SFX halus, menormalkan audio, memasang aset campaign, membuat caption, menjalankan compliance gate, lalu mengirim hasil yang lulus ke Telegram.
+ 
+ Periksa `editorial-plan.json` pada folder setiap klip. Jika klasifikasinya `already_edited`, gunakan event lebih sedikit atau kosong. Jangan menumpuk spotlight di atas teks yang sudah ada.
+ 
+@@ -438,7 +477,7 @@ Pekerjaan berhasil ketika:
+ 1. `doctor` lulus.
+ 2. `validate` menyatakan rencana valid.
+ 3. `render-manifest.json` mencatat klip yang selesai.
+-4. Setiap folder klip memiliki `editorial-plan.json`, `visual-plan.json`, `visual-assets`, dan `subtitle-editorial.ass`.
++4. Setiap folder klip memiliki `editorial-plan.json`, `visual-plan.json`, `visual-assets`, `motion-plan.json`, `clip-motioncraft.mp4`, dan `subtitle-editorial.ass` ketika MotionCraft aktif.
+ 5. Spotlight text serta visual explainer tidak bertabrakan dengan subtitle dan SFX tidak menutupi suara.
+ 6. Headline tampil 3-5 detik, mudah dibaca, sesuai footage, open-loop, dan nama tokoh yang terverifikasi mendapat highlight.
+ 7. Cinematic focus menggelapkan sisi frame tanpa menutup wajah atau teks.
+@@ -448,3 +487,5 @@ Pekerjaan berhasil ketika:
+ 11. Semua klip yang lulus berhasil muncul di Telegram dengan tiga tombol keputusan.
+ 12. `status --job` menunjukkan keputusan yang sama dengan tombol Telegram.
+ 13. Tidak ada publikasi sebelum status `approved`.
++14. `motion-plan.json` hanya berisi cue yang berasal dari transkrip, mencatat warning kata berprobabilitas rendah, dan tidak menumpuk motion pada visual cutaway.
++15. `render-manifest.json` mencatat `motioncraft_rendered: true`; jika mode `auto` memakai fallback, alasannya tercatat pada `motioncraft_error`.

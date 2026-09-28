@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "preset_id": "campaign-safe-zones-v3",
+  "safe_margin_ratio": 0.08,
+  "opening_reserved_until": 5.2,
+  "hook": {
+    "max_lines": 2,
+    "min_duration": 3.5,
+    "max_duration": 5.0,
+    "show_kicker": false,
+    "max_words": 16
+  },
+  "subtitle": {
+    "max_lines": 2,
+    "min_words": 2,
+    "max_words": 5,
+    "opening_must_avoid_hook": true,
+    "keyword_overlay_policy": "inline_only"
+  },
+  "additional_text": {
+    "max_active_outside_subtitle": 1,
+    "suppress_duplicate_words": true
+  },
+  "semantic": {
+    "min_start": 5.2,
+    "max_label_words": 4,
+    "side_margin_px": 58,
+    "top_px": 370,
+    "bottom_px": 245,
+    "width_px": 270
+  },
+  "visual": {
+    "min_start": 5.2,
+    "must_be_transcript_linked": true
+  }
+}

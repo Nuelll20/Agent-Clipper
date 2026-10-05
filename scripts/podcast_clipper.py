@@ -22,6 +22,13 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.event_store import EventStore
+from core.observation import RunObserver
+
 
 SCHEMA_VERSION = 1
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".webm", ".mov", ".m4v"}
@@ -41,6 +48,17 @@ def project_root() -> Path:
 
 def scripts_root() -> Path:
     return Path(__file__).resolve().parent
+
+
+def default_event_db() -> Path:
+    configured = os.environ.get("HERMES_EVENT_DB", "").strip()
+    return Path(configured).expanduser() if configured else project_root() / "state" / "production-events.db"
+
+
+def observe(args: argparse.Namespace, stage: str, message: str) -> None:
+    observer = getattr(args, "observer", None)
+    if observer is not None:
+        observer.emit(stage, message)
 
 
 def default_jobs_root() -> Path:
@@ -243,10 +261,12 @@ def command_ingest(args: argparse.Namespace) -> int:
         pass
 
     if existing and not args.force_download:
+        observe(args, "source_reused", "Menggunakan video sumber yang tersedia")
         source = existing
         print(f"Menggunakan source yang sudah ada: {source.name}")
     else:
         print("Mengunduh video sumber...")
+        observe(args, "downloading", "Mengunduh video sumber")
         download_command = [
             python,
             "-m",
@@ -267,6 +287,7 @@ def command_ingest(args: argparse.Namespace) -> int:
         run_command(download_command, cwd=job_dir)
         source = find_downloaded_source(job_dir)
 
+    observe(args, "probing", "Memeriksa video sumber")
     media = ffprobe(source)
     if media["duration"] <= 0:
         raise WorkflowError("Durasi video sumber tidak dapat dibaca.")
@@ -277,9 +298,11 @@ def command_ingest(args: argparse.Namespace) -> int:
         )
 
     if transcript_path.is_file() and not args.force_transcribe:
+        observe(args, "transcript_reused", "Menggunakan transkrip yang tersedia")
         print("Menggunakan transkrip yang sudah ada.")
     else:
         print("Mentranskripsikan sumber dengan word timestamps...")
+        observe(args, "transcribing", "Mentranskripsikan video sumber")
         run_command(
             [
                 python,
@@ -295,6 +318,7 @@ def command_ingest(args: argparse.Namespace) -> int:
         )
 
     metadata = load_source_metadata(job_dir)
+    observe(args, "saving_artifacts", "Menyimpan metadata dan rencana klip")
     job_payload = {
         "schema_version": SCHEMA_VERSION,
         "job_id": job_id,
@@ -996,7 +1020,12 @@ def render_one_clip(
     send_to_telegram: bool,
     campaign_path: Path | None = None,
     campaign_assignment: Path | None = None,
+    observer: RunObserver | None = None,
 ) -> dict[str, Any]:
+    def progress(stage: str, message: str) -> None:
+        if observer is not None:
+            observer.emit(stage, message, clip_id=clip["id"])
+
     python = sys.executable
     clip_dir = job_dir / "clips" / clip["id"]
     clip_dir.mkdir(parents=True, exist_ok=True)
@@ -1019,6 +1048,7 @@ def render_one_clip(
     motioncraft_video = clip_dir / "clip-motioncraft.mp4"
 
     print(f"\n[{clip['id']}] Memotong dan membuat framing vertikal...")
+    progress("clipping", "Memotong video dan menyiapkan framing vertikal")
     cut_details = cut_vertical_clip(
         source,
         raw_video,
@@ -1036,6 +1066,7 @@ def render_one_clip(
     write_json(clip_transcript, sliced)
 
     print(f"[{clip['id']}] Membuat hook dan subtitle cinematic...")
+    progress("subtitling", "Membuat hook dan subtitle")
     run_command(
         [
             python,
@@ -1050,6 +1081,7 @@ def render_one_clip(
     write_json(edit_plan, edit_payload)
 
     editorial_style = str(clip.get("editorial_style") or "balanced").casefold()
+    progress("editorial_planning", "Menyiapkan rencana editorial")
     if editorial_style not in {"off", "subtle", "balanced", "energetic"}:
         raise WorkflowError(
             f"editorial_style {clip['id']} tidak valid: {editorial_style}"
@@ -1091,6 +1123,7 @@ def render_one_clip(
         write_json(editorial_plan, editorial_payload)
 
     visual_style = str(clip.get("visual_style") or "balanced").casefold()
+    progress("visual_planning", "Menyiapkan visual pendukung")
     if visual_style not in {"off", "subtle", "balanced", "immersive"}:
         raise WorkflowError(f"visual_style {clip['id']} tidak valid: {visual_style}")
     visual_script = require_file(
@@ -1190,6 +1223,7 @@ def render_one_clip(
             )
         if renderer_available:
             print(f"[{clip['id']}] Merender motion semantik dengan MotionCraft...")
+            progress("motion_rendering", "Merender motion dengan MotionCraft")
             motioncraft_command = [
                 python,
                 str(bridge),
@@ -1234,6 +1268,7 @@ def render_one_clip(
                 motioncraft_error = str(exc)
                 if motioncraft_mode == "on":
                     raise
+                progress("motion_fallback", "MotionCraft gagal; memakai renderer FFmpeg")
                 print(
                     f"[{clip['id']}] MotionCraft auto gagal; memakai renderer "
                     f"FFmpeg lama. Detail: {motioncraft_error}",
@@ -1247,6 +1282,7 @@ def render_one_clip(
             )
 
     print(f"[{clip['id']}] Menambahkan spotlight text...")
+    progress("subtitle_assembly", "Menyatukan subtitle dan spotlight")
     run_command(
         [
             python,
@@ -1281,6 +1317,7 @@ def render_one_clip(
         render_subtitle = campaign_subtitle
 
     print(f"[{clip['id']}] Merender motion, SFX, dan audio editorial...")
+    progress("rendering", "Merender video dan audio editorial")
     editorial_output = editorial_video if campaign_path is not None else output_video
     run_command(
         [
@@ -1304,6 +1341,7 @@ def render_one_clip(
             raise WorkflowError("Campaign assignment belum tersedia.")
         campaign_script = require_file(scripts_root() / "campaign_pro.py", "Campaign engine")
         print(f"[{clip['id']}] Memasang komponen campaign...")
+        progress("campaign", "Menerapkan dan memeriksa campaign")
         run_command(
             [
                 python,
@@ -1369,6 +1407,7 @@ def render_one_clip(
     telegram_sent = False
     if send_to_telegram:
         print(f"[{clip['id']}] Mengirim hasil ke Telegram...")
+        progress("sending_review", "Mengirim video untuk review Telegram")
         run_command(
             [
                 python,
@@ -1443,6 +1482,7 @@ def command_validate(args: argparse.Namespace) -> int:
 
 
 def command_render(args: argparse.Namespace) -> int:
+    observe(args, "validating", "Memvalidasi sumber dan rencana klip")
     plan_path = Path(args.plan).expanduser().resolve()
     raw_plan = read_json(plan_path)
     source = resolve_plan_file(raw_plan.get("source_path"), plan_path, "Video sumber")
@@ -1492,6 +1532,11 @@ def command_render(args: argparse.Namespace) -> int:
     }
 
     failures = 0
+    observer = getattr(args, "observer", None)
+    if observer is not None:
+        observer.current = 0
+        observer.total = len(selected_clips)
+        observer.emit("render_batch", "Memulai batch klip")
     for clip in selected_clips:
         try:
             result = render_one_clip(
@@ -1503,10 +1548,16 @@ def command_render(args: argparse.Namespace) -> int:
                 send_to_telegram=not args.no_send,
                 campaign_path=campaign_path,
                 campaign_assignment=campaign_assignment,
+                observer=observer,
             )
             manifest["clips"].append({"status": "completed", **result})
+            if observer is not None:
+                observer.current += 1
+                observer.emit("clip_completed", "Klip selesai diproses", clip_id=clip["id"])
         except Exception as exc:
             failures += 1
+            if observer is not None:
+                observer.emit("clip_failed", "Pemrosesan klip gagal; lihat log developer", clip_id=clip["id"])
             manifest["clips"].append(
                 {
                     "clip_id": clip["id"],
@@ -1730,6 +1781,57 @@ def command_doctor(_: argparse.Namespace) -> int:
     return delegate_approval(["doctor"])
 
 
+def command_runs(args: argparse.Namespace) -> int:
+    store = EventStore(Path(args.event_db).expanduser())
+    try:
+        print(json.dumps(store.list_runs(args.job, args.limit), ensure_ascii=False, indent=2))
+    finally:
+        store.close()
+    return 0
+
+
+def command_events(args: argparse.Namespace) -> int:
+    store = EventStore(Path(args.event_db).expanduser())
+    try:
+        print(json.dumps(store.read_events(args.run, args.after, args.limit), ensure_ascii=False, indent=2))
+    finally:
+        store.close()
+    return 0
+
+
+def execute_observed(args: argparse.Namespace) -> int:
+    if args.command not in {"ingest", "render"}:
+        return int(args.handler(args) or 0)
+    if args.command == "ingest":
+        args.job = safe_job_id(args.job or generated_job_id())
+        job_id = args.job
+    else:
+        plan = read_json(Path(args.plan).expanduser().resolve())
+        if not isinstance(plan, dict):
+            raise WorkflowError("Root clip-plan.json harus berupa object.")
+        job_id = safe_job_id(str(plan.get("job_id") or ""))
+    observer = RunObserver(Path(args.event_db).expanduser(), job_id, "CLIP_" + args.command.upper())
+    args.observer = observer
+    try:
+        result = int(args.handler(args) or 0)
+        observer.emit(
+            "completed" if result == 0 else "failed",
+            "Perintah selesai" if result == 0 else "Perintah selesai dengan kegagalan; lihat log developer",
+            state="COMPLETED" if result == 0 else "FAILED",
+        )
+        return result
+    except (Exception, KeyboardInterrupt) as exc:
+        observer.emit(
+            "interrupted" if isinstance(exc, KeyboardInterrupt) else "failed",
+            "Proses terhenti; lihat log developer",
+            state="FAILED",
+        )
+        raise
+    finally:
+        observer.close()
+        args.observer = None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Pipeline Hermes untuk podcast clip, render, dan review Telegram.",
@@ -1746,6 +1848,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--force-download", action="store_true")
     ingest.add_argument("--force-transcribe", action="store_true")
     ingest.add_argument("--force-plan", action="store_true")
+    ingest.add_argument("--event-db", default=str(default_event_db()))
     ingest.set_defaults(handler=command_ingest)
 
     validate = subparsers.add_parser("validate", help="Validasi clip-plan.json")
@@ -1757,6 +1860,7 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--clip", action="append", help="Render hanya ID klip ini; dapat diulang")
     render.add_argument("--no-send", action="store_true")
     render.add_argument("--continue-on-error", action="store_true")
+    render.add_argument("--event-db", default=str(default_event_db()))
     render.set_defaults(handler=command_render)
 
     watch = subparsers.add_parser("watch", help="Pantau keputusan Telegram")
@@ -1788,13 +1892,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subparsers.add_parser("doctor", help="Periksa seluruh pipeline")
     doctor.set_defaults(handler=command_doctor)
+    runs = subparsers.add_parser("runs", help="Baca snapshot run produksi")
+    runs.add_argument("--job")
+    runs.add_argument("--limit", type=int, default=20)
+    runs.add_argument("--event-db", default=str(default_event_db()))
+    runs.set_defaults(handler=command_runs)
+    events = subparsers.add_parser("events", help="Baca event produksi berurutan")
+    events.add_argument("--run")
+    events.add_argument("--after", type=int, default=0)
+    events.add_argument("--limit", type=int, default=100)
+    events.add_argument("--event-db", default=str(default_event_db()))
+    events.set_defaults(handler=command_events)
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        return int(args.handler(args) or 0)
+        return execute_observed(args)
     except WorkflowError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

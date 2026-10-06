@@ -88,8 +88,7 @@ def test_render_batch_counts_successes_and_preserves_failure_manifest(tmp_path, 
     }))
     monkeypatch.setattr(clipper, "ffprobe", lambda _: {"duration": 60})
     monkeypatch.setattr(clipper, "prepare_campaign", lambda *a: (None, None, None))
-    def render(plan, item, source, transcript, job_dir, send_to_telegram, **kwargs):
-        assert send_to_telegram is False
+    def render(plan, item, source, transcript, job_dir, **kwargs):
         kwargs["observer"].emit("rendering", "Rendering", clip_id=item["id"])
         if item["id"] == "clip-01":
             raise clipper.WorkflowError("fixture failure")

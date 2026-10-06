@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import statistics
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -162,6 +164,13 @@ def resolve_plan_file(value: Any, plan_path: Path, label: str) -> Path:
     path = Path(str(value or "")).expanduser()
     if not path.is_absolute():
         path = plan_path.parent / path
+    return require_file(path.resolve(), label)
+
+
+def resolve_manifest_file(value: Any, manifest_path: Path, label: str) -> Path:
+    path = Path(str(value or "")).expanduser()
+    if not path.is_absolute():
+        path = manifest_path.parent / path
     return require_file(path.resolve(), label)
 
 
@@ -1017,7 +1026,6 @@ def render_one_clip(
     source: Path,
     full_transcript: dict[str, Any],
     job_dir: Path,
-    send_to_telegram: bool,
     campaign_path: Path | None = None,
     campaign_assignment: Path | None = None,
     observer: RunObserver | None = None,
@@ -1404,26 +1412,6 @@ def render_one_clip(
             encoding="utf-8",
         )
 
-    telegram_sent = False
-    if send_to_telegram:
-        print(f"[{clip['id']}] Mengirim hasil ke Telegram...")
-        progress("sending_review", "Mengirim video untuk review Telegram")
-        run_command(
-            [
-                python,
-                str(require_file(scripts_root() / "telegram_approval.py", "Telegram approval")),
-                "send",
-                str(output_video),
-                "--job",
-                plan["job_id"],
-                "--clip",
-                clip["id"],
-                "--caption-file",
-                str(caption_path),
-            ]
-        )
-        telegram_sent = True
-
     editorial_payload = read_json(editorial_plan)
     visual_payload = read_json(visual_plan)
     return {
@@ -1436,7 +1424,7 @@ def render_one_clip(
         "cinematic_side": clip["cinematic_side"],
         "output_video": str(output_video.resolve()),
         "caption_path": str(caption_path.resolve()),
-        "telegram_sent": telegram_sent,
+        "telegram_sent": False,
         "editorial_style": editorial_style,
         "editorial_event_count": len(editorial_payload.get("events") or []),
         "editing_density": editorial_payload.get("editing_density"),
@@ -1457,6 +1445,143 @@ def render_one_clip(
         "rendered_at": utc_now(),
         **cut_details,
     }
+
+
+def delivery_id(job_id: str, clip_result: dict[str, Any]) -> str:
+    material = "\0".join(
+        (
+            job_id,
+            str(clip_result.get("clip_id") or ""),
+            str(clip_result.get("output_video") or ""),
+            str(clip_result.get("rendered_at") or "legacy"),
+        )
+    )
+    return "delivery_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def new_delivery(job_id: str, clip_result: dict[str, Any], requested: bool) -> dict[str, Any]:
+    return {
+        "delivery_id": "delivery_" + uuid.uuid4().hex[:24],
+        "channel": "telegram",
+        "status": "pending" if requested else "not_requested",
+        "attempts": 0,
+        "last_attempt_at": None,
+        "sent_at": None,
+        "error": None,
+    }
+
+
+def normalize_delivery(job_id: str, clip_result: dict[str, Any]) -> dict[str, Any]:
+    current = clip_result.get("delivery")
+    if not isinstance(current, dict):
+        current = {}
+    status = str(current.get("status") or "").casefold()
+    if status not in {"not_requested", "pending", "sending", "sent", "failed"}:
+        status = "sent" if bool(clip_result.get("telegram_sent")) else "pending"
+    try:
+        attempts = max(0, int(current.get("attempts") or 0))
+    except (TypeError, ValueError):
+        attempts = 0
+    normalized = {
+        "delivery_id": str(current.get("delivery_id") or delivery_id(job_id, clip_result)),
+        "channel": "telegram",
+        "status": status,
+        "attempts": attempts,
+        "last_attempt_at": current.get("last_attempt_at"),
+        "sent_at": current.get("sent_at"),
+        "error": current.get("error"),
+    }
+    clip_result["delivery"] = normalized
+    clip_result["telegram_sent"] = status == "sent"
+    return normalized
+
+
+def save_render_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    manifest["updated_at"] = utc_now()
+    write_json(path, manifest)
+
+
+def deliver_manifest_clip(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    clip_result: dict[str, Any],
+    *,
+    observer: RunObserver | None = None,
+    force: bool = False,
+) -> str:
+    job_id = safe_job_id(str(manifest.get("job_id") or ""))
+    clip_id = safe_job_id(str(clip_result.get("clip_id") or ""))
+    delivery = normalize_delivery(job_id, clip_result)
+    if delivery["status"] == "sent" and not force:
+        if observer is not None:
+            observer.emit(
+                "delivery_skipped",
+                "Video sudah pernah dikirim; pengiriman duplikat dilewati",
+                clip_id=clip_id,
+            )
+        return "skipped"
+
+    delivery.update(
+        {
+            "status": "sending",
+            "attempts": delivery["attempts"] + 1,
+            "last_attempt_at": utc_now(),
+            "error": None,
+        }
+    )
+    clip_result["telegram_sent"] = False
+    save_render_manifest(manifest_path, manifest)
+    if observer is not None:
+        observer.emit("sending_review", "Mengirim video untuk review Telegram", clip_id=clip_id)
+
+    try:
+        output_video = resolve_manifest_file(
+            clip_result.get("output_video"),
+            manifest_path,
+            f"Video hasil {clip_id}",
+        )
+        caption_path = resolve_manifest_file(
+            clip_result.get("caption_path"),
+            manifest_path,
+            f"Caption {clip_id}",
+        )
+        command = [
+            sys.executable,
+            str(require_file(scripts_root() / "telegram_approval.py", "Telegram approval")),
+            "send",
+            str(output_video),
+            "--job",
+            job_id,
+            "--clip",
+            clip_id,
+            "--caption-file",
+            str(caption_path),
+        ]
+        if not force:
+            command.extend(["--delivery-key", delivery["delivery_id"]])
+        run_command(command)
+    except Exception as exc:
+        delivery.update({"status": "failed", "error": str(exc)})
+        save_render_manifest(manifest_path, manifest)
+        if observer is not None:
+            observer.emit(
+                "delivery_failed",
+                "Pengiriman Telegram gagal; video render tetap tersedia",
+                clip_id=clip_id,
+            )
+        print(
+            f"ERROR TELEGRAM [{clip_id}]: {exc}\n"
+            "Video tetap selesai dan dapat dikirim ulang dengan perintah deliver.",
+            file=sys.stderr,
+        )
+        return "failed"
+
+    delivery.update({"status": "sent", "sent_at": utc_now(), "error": None})
+    clip_result["telegram_sent"] = True
+    save_render_manifest(manifest_path, manifest)
+    if observer is not None:
+        observer.emit("delivery_sent", "Video terkirim untuk review Telegram", clip_id=clip_id)
+    return "sent"
 
 
 def command_validate(args: argparse.Namespace) -> int:
@@ -1532,6 +1657,8 @@ def command_render(args: argparse.Namespace) -> int:
     }
 
     failures = 0
+    delivery_failures = 0
+    deliveries_sent = 0
     observer = getattr(args, "observer", None)
     if observer is not None:
         observer.current = 0
@@ -1545,15 +1672,32 @@ def command_render(args: argparse.Namespace) -> int:
                 source,
                 full_transcript,
                 job_dir,
-                send_to_telegram=not args.no_send,
                 campaign_path=campaign_path,
                 campaign_assignment=campaign_assignment,
                 observer=observer,
             )
-            manifest["clips"].append({"status": "completed", **result})
+            completed = {"status": "completed", **result}
+            completed["delivery"] = new_delivery(
+                plan["job_id"],
+                completed,
+                requested=not args.no_send,
+            )
+            manifest["clips"].append(completed)
+            save_render_manifest(manifest_path, manifest)
             if observer is not None:
                 observer.current += 1
                 observer.emit("clip_completed", "Klip selesai diproses", clip_id=clip["id"])
+            if not args.no_send:
+                delivery_result = deliver_manifest_clip(
+                    manifest_path,
+                    manifest,
+                    completed,
+                    observer=observer,
+                )
+                if delivery_result == "sent":
+                    deliveries_sent += 1
+                elif delivery_result == "failed":
+                    delivery_failures += 1
         except Exception as exc:
             failures += 1
             if observer is not None:
@@ -1566,19 +1710,82 @@ def command_render(args: argparse.Namespace) -> int:
                     "failed_at": utc_now(),
                 }
             )
-            write_json(manifest_path, manifest)
+            save_render_manifest(manifest_path, manifest)
             print(f"ERROR [{clip['id']}]: {exc}", file=sys.stderr)
             if not args.continue_on_error:
                 raise
-        write_json(manifest_path, manifest)
+        save_render_manifest(manifest_path, manifest)
 
     print("\nRENDER BATCH SELESAI")
-    print(f"Berhasil: {len(selected_clips) - failures}")
-    print(f"Gagal   : {failures}")
+    print(f"Render berhasil : {len(selected_clips) - failures}")
+    print(f"Render gagal    : {failures}")
     print(f"Manifest: {manifest_path}")
-    if not args.no_send:
-        print("Semua hasil yang berhasil telah dikirim untuk persetujuan Telegram.")
-    return 1 if failures else 0
+    if args.no_send:
+        print("Telegram       : tidak diminta")
+    else:
+        print(f"Telegram terkirim: {deliveries_sent}")
+        print(f"Telegram gagal   : {delivery_failures}")
+        if delivery_failures:
+            print("Gunakan perintah deliver untuk mencoba ulang tanpa render ulang.")
+    return 1 if failures or delivery_failures else 0
+
+
+def command_deliver(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest).expanduser().resolve()
+    manifest = read_json(manifest_path)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("clips"), list):
+        raise WorkflowError("render-manifest.json tidak valid.")
+    job_id = safe_job_id(str(manifest.get("job_id") or ""))
+    completed = [
+        item
+        for item in manifest["clips"]
+        if isinstance(item, dict) and item.get("status") == "completed"
+    ]
+    if args.clip:
+        requested = set(args.clip)
+        available = {str(item.get("clip_id") or "") for item in completed}
+        unknown = sorted(requested - available)
+        if unknown:
+            raise WorkflowError(
+                "Klip belum memiliki render selesai di manifest: " + ", ".join(unknown)
+            )
+        completed = [item for item in completed if item.get("clip_id") in requested]
+    if not completed:
+        raise WorkflowError("Manifest belum memiliki klip selesai untuk dikirim.")
+
+    observer = getattr(args, "observer", None)
+    if observer is not None:
+        observer.current = 0
+        observer.total = len(completed)
+        observer.emit("delivery_batch", "Memulai pengiriman hasil render")
+
+    sent = 0
+    skipped = 0
+    failed = 0
+    for item in completed:
+        outcome = deliver_manifest_clip(
+            manifest_path,
+            manifest,
+            item,
+            observer=observer,
+            force=args.force,
+        )
+        if outcome == "sent":
+            sent += 1
+        elif outcome == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+        if observer is not None and outcome != "failed":
+            observer.current += 1
+
+    print("\nPENGIRIMAN TELEGRAM SELESAI")
+    print(f"Job ID  : {job_id}")
+    print(f"Terkirim: {sent}")
+    print(f"Dilewati: {skipped}")
+    print(f"Gagal   : {failed}")
+    print(f"Manifest: {manifest_path}")
+    return 1 if failed else 0
 
 
 def delegate_approval(arguments: list[str]) -> int:
@@ -1800,16 +2007,21 @@ def command_events(args: argparse.Namespace) -> int:
 
 
 def execute_observed(args: argparse.Namespace) -> int:
-    if args.command not in {"ingest", "render"}:
+    if args.command not in {"ingest", "render", "deliver"}:
         return int(args.handler(args) or 0)
     if args.command == "ingest":
         args.job = safe_job_id(args.job or generated_job_id())
         job_id = args.job
-    else:
+    elif args.command == "render":
         plan = read_json(Path(args.plan).expanduser().resolve())
         if not isinstance(plan, dict):
             raise WorkflowError("Root clip-plan.json harus berupa object.")
         job_id = safe_job_id(str(plan.get("job_id") or ""))
+    else:
+        manifest = read_json(Path(args.manifest).expanduser().resolve())
+        if not isinstance(manifest, dict):
+            raise WorkflowError("render-manifest.json harus berupa object.")
+        job_id = safe_job_id(str(manifest.get("job_id") or ""))
     observer = RunObserver(Path(args.event_db).expanduser(), job_id, "CLIP_" + args.command.upper())
     args.observer = observer
     try:
@@ -1862,6 +2074,20 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--continue-on-error", action="store_true")
     render.add_argument("--event-db", default=str(default_event_db()))
     render.set_defaults(handler=command_render)
+
+    deliver = subparsers.add_parser(
+        "deliver",
+        help="Kirim ulang hasil render ke Telegram tanpa merender video",
+    )
+    deliver.add_argument("--manifest", required=True)
+    deliver.add_argument("--clip", action="append", help="Kirim hanya ID klip ini; dapat diulang")
+    deliver.add_argument(
+        "--force",
+        action="store_true",
+        help="Kirim ulang meski manifest sudah mencatat status sent",
+    )
+    deliver.add_argument("--event-db", default=str(default_event_db()))
+    deliver.set_defaults(handler=command_deliver)
 
     watch = subparsers.add_parser("watch", help="Pantau keputusan Telegram")
     watch.add_argument("--once", action="store_true")

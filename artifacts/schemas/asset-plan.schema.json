@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Shot Asset Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "production_id", "story_manifest_path",
+    "story_manifest_fingerprint", "voice_cast_path", "voice_cast_fingerprint",
+    "provider_mode", "provider_config_path", "provider_config_fingerprint",
+    "created_at", "video", "shots"
+  ],
+  "properties": {
+    "artifact_type": {"const": "asset-plan"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "minLength": 1},
+    "revision_id": {"type": "string", "minLength": 1},
+    "production_id": {"type": "string", "minLength": 1},
+    "story_manifest_path": {"type": "string", "minLength": 1},
+    "story_manifest_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "voice_cast_path": {"type": "string", "minLength": 1},
+    "voice_cast_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "provider_mode": {"enum": ["fixture", "command"]},
+    "provider_config_path": {"type": ["string", "null"]},
+    "provider_config_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps"],
+      "properties": {
+        "width": {"type": "integer", "minimum": 64},
+        "height": {"type": "integer", "minimum": 64},
+        "fps": {"type": "number", "exclusiveMinimum": 0, "maximum": 240}
+      }
+    },
+    "shots": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["shot_id", "scene_id", "duration_seconds", "assets"],
+        "properties": {
+          "shot_id": {"type": "string", "minLength": 1},
+          "scene_id": {"type": "string", "minLength": 1},
+          "duration_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "assets": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "agent_id", "output_extension", "request"],
+              "properties": {
+                "kind": {"enum": ["reference", "animation", "voice", "sfx"]},
+                "agent_id": {"type": "string", "minLength": 1},
+                "output_extension": {"type": "string", "pattern": "^\\.[A-Za-z0-9]{1,8}$"},
+                "request": {"type": "object", "minProperties": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

@@ -9,6 +9,8 @@ secrets/
 state/
 campaigns/
 stories/
+productions/
+config/asset-providers.local.json
 node_modules/
 __pycache__/
 *.zip

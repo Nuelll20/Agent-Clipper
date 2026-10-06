@@ -85,3 +85,9 @@ continuity, urutan stage, dan SHA-256 setiap upstream artifact.
 Approval terikat pada fingerprint manifest. Mengubah manifest atau stage setelah
 approval memblokir gate produksi. Detail operasi dan batasnya ada di
 `STORY_PIPELINE.md`.
+
+Checkpoint F menambahkan `voice-cast`, `asset-plan`, `asset-attempt`, dan
+`asset-manifest`. Attempt bersifat immutable dan menyimpan fingerprint request,
+output, dependency, provider, serta regeneration key. Animation ditautkan ke
+reference shot tertentu sehingga reference baru tidak dapat memakai animation
+lama secara diam-diam. Detail ada di `ASSET_PIPELINE.md`.

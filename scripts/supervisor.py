@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.artifacts import sha256_file, sha256_json
+from core.production import ASSET_ORDER, load_asset_plan
 from core.supervisor import (
     SupervisorError,
     SupervisorStore,
@@ -161,6 +162,56 @@ def command_enqueue_story(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_enqueue_assets(args: argparse.Namespace) -> int:
+    plan_path, plan, _ = load_asset_plan(args.plan)
+    available_shots = {shot["shot_id"] for shot in plan["shots"]}
+    requested_shots = list(dict.fromkeys(args.shot or []))
+    unknown_shots = sorted(set(requested_shots) - available_shots)
+    if unknown_shots:
+        raise SupervisorError("Shot tidak ada dalam asset plan: " + ", ".join(unknown_shots))
+    requested_assets = list(dict.fromkeys(args.asset or []))
+    regeneration_id = (
+        safe_story_id(args.regeneration_id, label="regeneration_id")
+        if args.regeneration_id
+        else None
+    )
+    payload = {
+        "plan_path": str(plan_path),
+        "plan_fingerprint": sha256_file(plan_path),
+        "shot_ids": requested_shots,
+        "asset_kinds": requested_assets,
+        "continue_on_error": bool(args.continue_on_error),
+        "regeneration_id": regeneration_id,
+    }
+    idempotency_key = args.idempotency_key or (
+        "generate-assets:"
+        + sha256_json({
+            "story_id": plan["story_id"],
+            "revision_id": plan["revision_id"],
+            "production_id": plan["production_id"],
+            **payload,
+        }).split(":", 1)[1]
+    )
+    store = SupervisorStore(args.db)
+    try:
+        task, created = store.enqueue(
+            job_id=plan["story_id"],
+            kind="GENERATE_ASSETS",
+            payload=payload,
+            idempotency_key=idempotency_key,
+            resources=[
+                f"production:{plan['story_id']}:{plan['production_id']}",
+                "asset-generation",
+            ],
+            priority=args.priority,
+            max_attempts=args.max_attempts,
+        )
+    finally:
+        store.close()
+    print_json({"created": created, "task": task})
+    return 0
+
+
 def command_list(args: argparse.Namespace) -> int:
     store = SupervisorStore(args.db)
     try:
@@ -291,6 +342,23 @@ def build_parser() -> argparse.ArgumentParser:
     story.add_argument("--max-attempts", type=int, default=2)
     story.add_argument("--idempotency-key")
     story.set_defaults(handler=command_enqueue_story)
+
+    assets = enqueue_actions.add_parser(
+        "assets",
+        help="Antrekan generation/regeneration asset shot",
+    )
+    assets.add_argument("--plan", required=True)
+    assets.add_argument("--shot", action="append")
+    assets.add_argument("--asset", action="append", choices=list(ASSET_ORDER))
+    assets.add_argument("--continue-on-error", action="store_true")
+    assets.add_argument(
+        "--regeneration-id",
+        help="ID baru untuk regenerasi selektif; retry task yang sama tetap idempotent",
+    )
+    assets.add_argument("--priority", type=int, default=0)
+    assets.add_argument("--max-attempts", type=int, default=2)
+    assets.add_argument("--idempotency-key")
+    assets.set_defaults(handler=command_enqueue_assets)
 
     worker = subparsers.add_parser("worker", help="Jalankan worker queue")
     worker.add_argument("--once", action="store_true")

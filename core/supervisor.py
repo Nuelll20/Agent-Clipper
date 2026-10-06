@@ -825,6 +825,60 @@ def build_story_development_command(
     return command
 
 
+def build_asset_generation_command(
+    task: dict[str, Any],
+    *,
+    project_root: str | Path,
+    event_db: str | Path,
+    python_executable: str | Path = sys.executable,
+) -> list[str]:
+    if task.get("kind") != "GENERATE_ASSETS":
+        raise TaskConfigurationError(f"Adapter tidak tersedia untuk {task.get('kind')!r}.")
+    payload = task.get("payload")
+    if not isinstance(payload, dict):
+        raise TaskConfigurationError("Payload GENERATE_ASSETS harus berupa object.")
+    plan = Path(str(payload.get("plan_path") or "")).expanduser()
+    if not plan.is_absolute():
+        plan = Path(project_root) / plan
+    plan = plan.resolve()
+    if not plan.is_file():
+        raise TaskConfigurationError(f"Asset plan tidak ditemukan: {plan}")
+    expected_fingerprint = str(payload.get("plan_fingerprint") or "").strip()
+    if not expected_fingerprint:
+        raise TaskConfigurationError("Payload GENERATE_ASSETS tidak memiliki plan_fingerprint.")
+    if _file_fingerprint(plan) != expected_fingerprint:
+        raise TaskConfigurationError(
+            "Asset plan berubah setelah task diantrikan; enqueue task baru diperlukan."
+        )
+    shot_ids = payload.get("shot_ids") or []
+    asset_kinds = payload.get("asset_kinds") or []
+    if not isinstance(shot_ids, list) or any(not str(item).strip() for item in shot_ids):
+        raise TaskConfigurationError("shot_ids GENERATE_ASSETS harus berupa daftar ID.")
+    if not isinstance(asset_kinds, list) or any(not str(item).strip() for item in asset_kinds):
+        raise TaskConfigurationError("asset_kinds GENERATE_ASSETS harus berupa daftar kind.")
+    command = [
+        str(python_executable),
+        str(Path(project_root) / "scripts" / "animation_studio.py"),
+        "generate",
+        "--plan",
+        str(plan),
+        "--event-db",
+        str(Path(event_db).expanduser().resolve()),
+        "--task-id",
+        str(task["task_id"]),
+    ]
+    for shot_id in shot_ids:
+        command.extend(("--shot", str(shot_id).strip()))
+    for kind in asset_kinds:
+        command.extend(("--asset", str(kind).strip()))
+    regeneration_id = str(payload.get("regeneration_id") or "").strip()
+    if regeneration_id:
+        command.extend(("--regeneration-key", regeneration_id))
+    if payload.get("continue_on_error") is True:
+        command.append("--continue-on-error")
+    return command
+
+
 def build_task_command(
     task: dict[str, Any],
     *,
@@ -841,6 +895,13 @@ def build_task_command(
         )
     if task.get("kind") == "DEVELOP_STORY":
         return build_story_development_command(
+            task,
+            project_root=project_root,
+            event_db=event_db,
+            python_executable=python_executable,
+        )
+    if task.get("kind") == "GENERATE_ASSETS":
+        return build_asset_generation_command(
             task,
             project_root=project_root,
             event_db=event_db,

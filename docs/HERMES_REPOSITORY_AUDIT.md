@@ -148,3 +148,10 @@ SQLite, idempotent enqueue, lease job/resource, heartbeat fencing, bounded retry
 crash recovery ke `RECOVERY_REQUIRED`, dan adapter `CLIP_VIDEO` yang selalu
 memakai `--no-send`. Candidate ini lulus **54 tes** dengan satu tes font Windows
 dilewati di Linux; verifikasi Windows dan merge masih diperlukan.
+
+Pembaruan sesudah PR #4: Checkpoint D telah di-merge ke `main`. Branch
+`feat/story-pipeline` mengerjakan Checkpoint E: brief versioned, enam role story,
+lineage/fingerprint per stage, critique dan continuity gate, review yang terikat
+ke revisi, event agent, serta adapter Supervisor `DEVELOP_STORY`. Provider awal
+memakai endpoint Chat Completions OpenAI-compatible; provider fixture hanya untuk
+tes offline. Assets dan animasi tetap berada di Checkpoint F.

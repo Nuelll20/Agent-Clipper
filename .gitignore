@@ -8,6 +8,7 @@ output/
 secrets/
 state/
 campaigns/
+stories/
 node_modules/
 __pycache__/
 *.zip

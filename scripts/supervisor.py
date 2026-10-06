@@ -23,6 +23,7 @@ from core.supervisor import (
     SupervisorWorker,
     TASK_STATES,
 )
+from core.story import safe_story_id, validate_story_brief
 
 
 def default_supervisor_db() -> Path:
@@ -105,6 +106,52 @@ def command_enqueue_clip_video(args: argparse.Namespace) -> int:
             payload=payload,
             idempotency_key=idempotency_key,
             resources=["clipper-render"],
+            priority=args.priority,
+            max_attempts=args.max_attempts,
+        )
+    finally:
+        store.close()
+    print_json({"created": created, "task": task})
+    return 0
+
+
+def command_enqueue_story(args: argparse.Namespace) -> int:
+    brief_path = Path(args.brief).expanduser().resolve()
+    brief = validate_story_brief(load_json_object(brief_path, "Story brief"))
+    story_id = safe_story_id(brief["story_id"])
+    if args.provider == "openai-compatible" and not str(args.model or "").strip():
+        raise SupervisorError(
+            "--model wajib untuk provider openai-compatible; secret tetap dibaca worker dari env."
+        )
+    payload = {
+        "story_id": story_id,
+        "brief_path": str(brief_path),
+        "brief_fingerprint": sha256_file(brief_path),
+        "provider": args.provider,
+        "output_root": str(Path(args.output_root).expanduser().resolve()),
+    }
+    if args.provider == "openai-compatible":
+        payload.update({
+            "base_url": args.base_url,
+            "model": args.model.strip(),
+            "api_key_env": args.api_key_env,
+            "timeout_seconds": args.timeout_seconds,
+        })
+    idempotency_key = args.idempotency_key or (
+        "develop-story:"
+        + sha256_json(payload).split(":", 1)[1]
+    )
+    resources = [f"story:{story_id}"]
+    if args.provider == "openai-compatible":
+        resources.append("story-llm")
+    store = SupervisorStore(args.db)
+    try:
+        task, created = store.enqueue(
+            job_id=story_id,
+            kind="DEVELOP_STORY",
+            payload=payload,
+            idempotency_key=idempotency_key,
+            resources=resources,
             priority=args.priority,
             max_attempts=args.max_attempts,
         )
@@ -218,6 +265,32 @@ def build_parser() -> argparse.ArgumentParser:
     clip_video.add_argument("--max-attempts", type=int, default=2)
     clip_video.add_argument("--idempotency-key")
     clip_video.set_defaults(handler=command_enqueue_clip_video)
+
+    story = enqueue_actions.add_parser(
+        "story",
+        help="Antrekan enam agent story dengan artifact review-gated",
+    )
+    story.add_argument("--brief", required=True)
+    story.add_argument(
+        "--provider",
+        choices=["openai-compatible", "fixture"],
+        default="openai-compatible",
+    )
+    story.add_argument(
+        "--base-url",
+        default=os.environ.get("HERMES_LLM_BASE_URL", "http://127.0.0.1:20128/v1"),
+    )
+    story.add_argument("--model", default=os.environ.get("HERMES_LLM_MODEL", ""))
+    story.add_argument("--api-key-env", default="HERMES_LLM_API_KEY")
+    story.add_argument("--timeout-seconds", type=float, default=180)
+    story.add_argument(
+        "--output-root",
+        default=os.environ.get("HERMES_STORY_ROOT", str(PROJECT_ROOT / "stories")),
+    )
+    story.add_argument("--priority", type=int, default=0)
+    story.add_argument("--max-attempts", type=int, default=2)
+    story.add_argument("--idempotency-key")
+    story.set_defaults(handler=command_enqueue_story)
 
     worker = subparsers.add_parser("worker", help="Jalankan worker queue")
     worker.add_argument("--once", action="store_true")

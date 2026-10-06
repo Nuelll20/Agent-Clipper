@@ -21,11 +21,12 @@ TASK_STATES = frozenset({
     "QUEUED",
     "RUNNING",
     "RETRY_WAIT",
+    "REVIEW_REQUIRED",
     "RECOVERY_REQUIRED",
     "FAILED",
     "COMPLETED",
 })
-TERMINAL_TASK_STATES = frozenset({"FAILED", "COMPLETED"})
+TERMINAL_TASK_STATES = frozenset({"FAILED", "COMPLETED", "REVIEW_REQUIRED"})
 RETRYABLE_TASK_STATES = frozenset({"FAILED", "RECOVERY_REQUIRED"})
 
 
@@ -616,6 +617,57 @@ class SupervisorStore:
             self._rollback()
             raise
 
+    def require_review(
+        self,
+        task_id: str,
+        worker_id: str,
+        lease_token: str,
+        reason: Any,
+        *,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        """Finish execution at an expected human-review gate without retrying."""
+        current = time.time() if now is None else float(now)
+        timestamp = utc_now(current)
+        cleaned = _clean_error(reason) or "Human review required"
+        try:
+            self._begin()
+            self._owned_task(task_id, worker_id, lease_token, current)
+            self.connection.execute(
+                """
+                UPDATE tasks
+                SET state = 'REVIEW_REQUIRED', next_attempt_at = 0,
+                    lease_owner = NULL, lease_token = NULL,
+                    lease_expires_at = NULL, heartbeat_at = NULL,
+                    updated_at = ?, finished_at = ?, last_error = NULL, result = ?
+                WHERE task_id = ?
+                """,
+                (
+                    timestamp,
+                    timestamp,
+                    json.dumps({"review_reason": cleaned}, ensure_ascii=False, sort_keys=True),
+                    task_id,
+                ),
+            )
+            self.connection.execute(
+                "DELETE FROM resource_leases WHERE task_id = ?", (task_id,),
+            )
+            self._event(
+                task_id,
+                "REVIEW_REQUIRED",
+                "review_required",
+                cleaned,
+                timestamp=current,
+            )
+            row = self.connection.execute(
+                "SELECT * FROM tasks WHERE task_id = ?", (task_id,),
+            ).fetchone()
+            self._commit()
+            return self._task(row)
+        except Exception:
+            self._rollback()
+            raise
+
     def retry_task(self, task_id: str, *, now: float | None = None) -> dict[str, Any]:
         current = time.time() if now is None else float(now)
         timestamp = utc_now(current)
@@ -700,6 +752,103 @@ def build_clip_video_command(
     return command
 
 
+def build_story_development_command(
+    task: dict[str, Any],
+    *,
+    project_root: str | Path,
+    event_db: str | Path,
+    python_executable: str | Path = sys.executable,
+) -> list[str]:
+    if task.get("kind") != "DEVELOP_STORY":
+        raise TaskConfigurationError(f"Adapter tidak tersedia untuk {task.get('kind')!r}.")
+    payload = task.get("payload")
+    if not isinstance(payload, dict):
+        raise TaskConfigurationError("Payload DEVELOP_STORY harus berupa object.")
+    brief = Path(str(payload.get("brief_path") or "")).expanduser()
+    if not brief.is_absolute():
+        brief = Path(project_root) / brief
+    brief = brief.resolve()
+    if not brief.is_file():
+        raise TaskConfigurationError(f"Story brief tidak ditemukan: {brief}")
+    expected_fingerprint = str(payload.get("brief_fingerprint") or "").strip()
+    if not expected_fingerprint:
+        raise TaskConfigurationError("Payload DEVELOP_STORY tidak memiliki brief_fingerprint.")
+    if _file_fingerprint(brief) != expected_fingerprint:
+        raise TaskConfigurationError(
+            "Story brief berubah setelah task diantrikan; enqueue task baru diperlukan."
+        )
+    story_id = str(payload.get("story_id") or "").strip()
+    if not story_id:
+        raise TaskConfigurationError("Payload DEVELOP_STORY tidak memiliki story_id.")
+    provider = str(payload.get("provider") or "").strip()
+    if provider not in {"openai-compatible", "fixture"}:
+        raise TaskConfigurationError("Provider DEVELOP_STORY tidak didukung.")
+    output_root = Path(str(payload.get("output_root") or "")).expanduser()
+    if not output_root.is_absolute():
+        output_root = Path(project_root) / output_root
+    command = [
+        str(python_executable),
+        str(Path(project_root) / "scripts" / "story_studio.py"),
+        "develop",
+        "--brief",
+        str(brief),
+        "--story-id",
+        story_id,
+        "--revision-id",
+        str(task["task_id"]),
+        "--provider",
+        provider,
+        "--output-root",
+        str(output_root.resolve()),
+        "--event-db",
+        str(Path(event_db).expanduser().resolve()),
+        "--task-id",
+        str(task["task_id"]),
+    ]
+    if provider == "openai-compatible":
+        base_url = str(payload.get("base_url") or "").strip()
+        model = str(payload.get("model") or "").strip()
+        api_key_env = str(payload.get("api_key_env") or "HERMES_LLM_API_KEY").strip()
+        timeout_seconds = payload.get("timeout_seconds", 180)
+        if not base_url or not model or not api_key_env:
+            raise TaskConfigurationError(
+                "Provider openai-compatible memerlukan base_url, model, dan api_key_env."
+            )
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+            raise TaskConfigurationError("timeout_seconds DEVELOP_STORY harus berupa angka.")
+        command.extend((
+            "--base-url", base_url,
+            "--model", model,
+            "--api-key-env", api_key_env,
+            "--timeout-seconds", str(timeout_seconds),
+        ))
+    return command
+
+
+def build_task_command(
+    task: dict[str, Any],
+    *,
+    project_root: str | Path,
+    event_db: str | Path,
+    python_executable: str | Path = sys.executable,
+) -> list[str]:
+    if task.get("kind") == "CLIP_VIDEO":
+        return build_clip_video_command(
+            task,
+            project_root=project_root,
+            event_db=event_db,
+            python_executable=python_executable,
+        )
+    if task.get("kind") == "DEVELOP_STORY":
+        return build_story_development_command(
+            task,
+            project_root=project_root,
+            event_db=event_db,
+            python_executable=python_executable,
+        )
+    raise TaskConfigurationError(f"Adapter tidak tersedia untuk {task.get('kind')!r}.")
+
+
 CommandRunner = Callable[[list[str], Path, Callable[[], None], float], int]
 
 
@@ -781,7 +930,7 @@ class SupervisorWorker:
             )
 
         try:
-            command = build_clip_video_command(
+            command = build_task_command(
                 task,
                 project_root=self.project_root,
                 event_db=self.event_db,
@@ -801,6 +950,14 @@ class SupervisorWorker:
                     result={"exit_code": 0},
                 )
                 return WorkerResult("completed", task_id, tuple(recovered))
+            if task["kind"] == "DEVELOP_STORY" and returncode == 3:
+                waiting = self.store.require_review(
+                    task_id,
+                    self.worker_id,
+                    lease_token,
+                    "DEVELOP_STORY stopped at critique or continuity review gate",
+                )
+                return WorkerResult(waiting["state"].casefold(), task_id, tuple(recovered))
             delay = min(
                 3600.0,
                 self.retry_delay_seconds * (2 ** max(0, task["attempt_count"] - 1)),
@@ -809,7 +966,7 @@ class SupervisorWorker:
                 task_id,
                 self.worker_id,
                 lease_token,
-                f"CLIP_VIDEO process exited with code {returncode}",
+                f"{task['kind']} process exited with code {returncode}",
                 retryable=True,
                 retry_delay_seconds=delay,
             )
@@ -842,7 +999,7 @@ class SupervisorWorker:
                 task_id,
                 self.worker_id,
                 lease_token,
-                f"Worker could not start CLIP_VIDEO process ({type(exc).__name__})",
+                f"Worker could not start {task['kind']} process ({type(exc).__name__})",
                 retryable=False,
             )
             return WorkerResult(failed["state"].casefold(), task_id, tuple(recovered))

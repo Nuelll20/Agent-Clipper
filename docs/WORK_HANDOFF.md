@@ -3,8 +3,8 @@
 ## Acuan
 
 Repository: https://github.com/Nuelll20/Agent-Clipper.
-Baseline: `13275c6` di main, hasil merge PR #3 artifact contract gate.
-Branch pekerjaan: `feat/supervisor-minimal`.
+Baseline: `f7d3cff` di main, hasil merge PR #4 Supervisor minimal.
+Branch pekerjaan: `feat/story-pipeline`.
 
 Source of truth tujuan: handoff pengguna, evolusi clipper existing menuju
 AI Workforce + Animation Studio + AI Office. Clipper harus tetap berfungsi.
@@ -33,6 +33,15 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 - Heartbeat memagari ownership; lease mati menjadi `RECOVERY_REQUIRED`.
 - Retry proses memakai backoff dan berhenti pada `max_attempts`.
 - Adapter `CLIP_VIDEO` memakai renderer existing dengan `--no-send`.
+- Checkpoint D sudah di-merge melalui PR #4 dan lulus 55 tes di Windows.
+- Story brief dan enam stage story memakai artifact canonical `2.0`.
+- Worldbuilder, plotter, screenwriter, critic, continuity, dan shot planner
+  menghasilkan lineage serta event agent yang dapat diaudit.
+- Critique `REVISE` dan continuity `BLOCKED` berhenti di `REVIEW_REQUIRED`.
+- Approval manusia terikat fingerprint manifest revisi dan fail-closed jika
+  artifact berubah sesudah review.
+- Adapter Supervisor `DEVELOP_STORY` memakai brief fingerprint dan tidak
+  menyimpan API key provider.
 
 ## File berubah
 
@@ -55,12 +64,18 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 | `scripts/supervisor.py` | CLI enqueue/worker/list/show/events/retry/recover |
 | `tests/test_supervisor.py` | Idempotensi, fencing, recovery, retry, adapter, dan CLI |
 | `docs/SUPERVISOR.md` | Operasi dan batas keselamatan Supervisor |
+| `core/story.py` | Kontrak semantic, provider, pipeline, lineage, dan approval story |
+| `scripts/story_studio.py` | CLI brief/develop/validate/review/approval-check |
+| `artifacts/schemas/story-*.schema.json` | Kontrak brief, stage, manifest, dan review |
+| `tests/test_story_pipeline.py` | Gate, resume, tamper, approval, event, dan adapter Supervisor |
+| `docs/STORY_PIPELINE.md` | Operasi dan batas Checkpoint E |
 
 ## Verifikasi
 
-Verifikasi branch Supervisor pada Linux: **54 passed, 1 skipped**. Skip merupakan
-pemeriksaan font produksi Windows. Tes targeted Supervisor/event/observation:
-**27 passed**. Compile check, bantuan CLI, dan diff whitespace check berhasil.
+Verifikasi branch story pada Linux: **71 passed, 1 skipped**. Skip merupakan tes
+font produksi Windows. Tes targeted story/Supervisor/event: **44 passed**.
+Integrasi offline Supervisor → subprocess → enam agent fixture → manifest juga
+lulus. Tes tidak memakai model kreatif atau render produksi.
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m pytest -q
@@ -73,15 +88,15 @@ Remotion, font Windows, atau Telegram live.
 
 ## Langkah berikutnya
 
-Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint D selesai. Berikutnya
-bangun artifact dan agent story (universe, outline, screenplay, kritik,
-continuity, shot list) sebelum provider animation dan AI Office.
+Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint E selesai. Berikutnya
+Checkpoint F membangun reference asset per shot, provider animation abstraction,
+voice identity, dan SFX dengan selective regeneration per shot.
 
 Task dengan heartbeat mati direkonsiliasi ke `RECOVERY_REQUIRED`, tetapi tidak
 auto-resume. Pastikan proses lama berhenti sebelum retry manual. Lock hanya berlaku
 untuk pekerjaan melalui Supervisor; jangan menjalankan CLI langsung bersamaan pada
-job yang sama. COMPLETED tidak berarti approved atau published. Fingerprint belum
-menjadi kebijakan invalidasi otomatis.
+job yang sama. COMPLETED tidak berarti approved atau published. Story stage sudah
+memeriksa lineage fingerprint; kebijakan invalidasi clipper lama belum otomatis.
 
 Git push memerlukan persetujuan sesuai permission model handoff pengguna.
 Jangan mengirim Telegram atau mempublikasikan video sebagai bagian smoke test.

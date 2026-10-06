@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Story Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "source_fingerprint", "config_fingerprint", "created_at",
+    "status", "artifacts"
+  ],
+  "properties": {
+    "artifact_type": {"const": "story-manifest"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "revision_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "source_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "config_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "status": {"const": "REVIEW_REQUIRED"},
+    "artifacts": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "agent_id", "path", "fingerprint"],
+        "properties": {
+          "stage": {"enum": ["universe", "outline", "screenplay", "critique", "continuity", "shot-list"]},
+          "agent_id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "pattern": "^[A-Za-z0-9-]+\\.json$"},
+          "fingerprint": {"$ref": "#/definitions/fingerprint"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

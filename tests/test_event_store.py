@@ -106,3 +106,24 @@ def test_existing_event_database_gets_task_identity_columns(tmp_path):
         assert store.read_events(run)[0]["task_id"] == "task-new"
     finally:
         store.close()
+
+
+def test_event_can_override_agent_and_progress_unit(tmp_path):
+    store = EventStore(tmp_path / "events.db")
+    try:
+        run = store.start_run("story", "STORY_DEVELOPMENT", agent_id="story-supervisor")
+        event = store.record(
+            run,
+            "WORKING",
+            "screenplay",
+            "Screenwriter finished",
+            current=3,
+            total=6,
+            unit="stages",
+            agent_id="screenwriter",
+        )
+        assert event["agent_id"] == "screenwriter"
+        assert event["unit"] == "stages"
+        assert event["current"] == 3
+    finally:
+        store.close()

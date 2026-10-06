@@ -1,4 +1,4 @@
-# Artifact contract dan validation gate — checkpoint C
+# Artifact contract dan validation gate — checkpoint C, diperluas checkpoint E
 
 Checkpoint ini menetapkan envelope artifact canonical `2.0` tanpa memutus
 transcript lama yang sudah dibuat Agent-Clipper. Gate yang aktif saat ini
@@ -74,3 +74,14 @@ dan attempt-isolated staging artifact masih belum diterapkan.
 Gate ini belum mencakup semua artifact editor, render manifest, EDL, QA report,
 atau scene graph produksi. Jangan menyimpulkan seluruh pipeline memiliki kontrak
 v2 hanya karena transcript dan job manifest sudah memilikinya.
+
+## Artifact story
+
+Checkpoint E menambahkan schema untuk `story-brief`, enam `story-<stage>`,
+`story-manifest`, dan `story-review`. Selain JSON Schema, semantic gate memeriksa
+referensi ID lintas universe/outline/screenplay/shot list, verdict critic,
+continuity, urutan stage, dan SHA-256 setiap upstream artifact.
+
+Approval terikat pada fingerprint manifest. Mengubah manifest atau stage setelah
+approval memblokir gate produksi. Detail operasi dan batasnya ada di
+`STORY_PIPELINE.md`.

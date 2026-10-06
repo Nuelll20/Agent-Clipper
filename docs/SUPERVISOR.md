@@ -1,9 +1,11 @@
-# Supervisor minimal — checkpoint D
+# Supervisor durable — checkpoint D, diperluas checkpoint E
 
 Supervisor menambahkan queue task lokal yang durable tanpa mengganti pipeline
 Agent-Clipper. Adapter `CLIP_VIDEO` tetap memanggil
 `scripts/podcast_clipper.py render`, sehingga caption, editorial, MotionCraft,
 artifact gate, manifest, dan event existing tetap menjadi jalur produksi.
+Checkpoint E menambahkan adapter `DEVELOP_STORY` yang memanggil enam role melalui
+`scripts/story_studio.py`.
 
 ## Penyimpanan dan identitas
 
@@ -25,6 +27,7 @@ ditulis dalam satu transaksi SQLite `BEGIN IMMEDIATE`.
 | `QUEUED` | Siap diklaim worker |
 | `RUNNING` | Sedang dimiliki satu worker dengan lease aktif |
 | `RETRY_WAIT` | Kegagalan dikenal; menunggu backoff dalam attempt budget |
+| `REVIEW_REQUIRED` | Critic/continuity meminta keputusan atau revisi manusia; tidak auto-retry |
 | `RECOVERY_REQUIRED` | Heartbeat hilang; operator harus memeriksa sebelum retry |
 | `FAILED` | Gagal permanen atau attempt budget habis |
 | `COMPLETED` | Adapter selesai dengan exit code 0 |
@@ -48,6 +51,10 @@ ditulis dalam satu transaksi SQLite `BEGIN IMMEDIATE`.
 7. Adapter `CLIP_VIDEO` selalu menambahkan `--no-send`. Retry Supervisor tidak
    mengirim Telegram atau mempublikasikan video. Delivery tetap memakai CLI
    `deliver` setelah artifact render dipastikan selesai.
+8. `DEVELOP_STORY` menghitung ulang fingerprint brief, memakai `task_id` sebagai
+   revision ID, tidak menyimpan API key, dan mengunci `story:<story_id>`.
+9. Critic `REVISE` atau continuity `BLOCKED` masuk `REVIEW_REQUIRED`; operator
+   harus membuat brief/revisi baru, bukan memaksa retry artifact yang sama.
 
 Lock hanya berlaku jika pekerjaan masuk melalui Supervisor. Menjalankan
 `podcast_clipper.py render` langsung tetap didukung, tetapi dapat melewati queue
@@ -65,6 +72,11 @@ Dari `D:\Hermes\video-agent`:
 # Atau hanya clip tertentu.
 & ".\.venv\Scripts\python.exe" scripts\supervisor.py enqueue clip-video `
   --plan "jobs\JOB_ID\clip-plan.json" --clip clip-01 --clip clip-03
+
+# Antrekan story development melalui endpoint model lokal.
+& ".\.venv\Scripts\python.exe" scripts\supervisor.py enqueue story `
+  --brief "stories\episode-001\brief.json" `
+  --model $env:HERMES_LLM_MODEL
 
 # Proses satu task lalu kembali ke prompt.
 & ".\.venv\Scripts\python.exe" scripts\supervisor.py worker --once
@@ -114,9 +126,9 @@ yang sama. Setelah penyebab diperbaiki, enqueue pekerjaan baru dengan
 ## Batas checkpoint
 
 Supervisor ini belum merupakan Windows Service, belum auto-start saat boot,
-dan belum memiliki pause/cancel process tree. Queue baru menyediakan adapter
-`CLIP_VIDEO`; story, image/video generation, voice, audio, assembly, QA, dan
-publisher akan menjadi adapter terpisah pada checkpoint berikutnya.
+dan belum memiliki pause/cancel process tree. Queue menyediakan adapter
+`CLIP_VIDEO` dan `DEVELOP_STORY`; image/video generation, voice, audio, assembly,
+QA, dan publisher akan menjadi adapter terpisah pada checkpoint berikutnya.
 
 Recovery lease tidak menebak apakah PID lama masih hidup. Karena itu task crash
 diblokir untuk inspeksi, bukan auto-resume. Dashboard belum tersedia; output JSON

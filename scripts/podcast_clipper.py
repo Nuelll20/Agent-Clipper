@@ -28,8 +28,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core.artifacts import (
+    build_job_manifest_contract,
+    sha256_json,
+    validate_transcript_contract,
+)
 from core.event_store import EventStore
 from core.observation import RunObserver
+from validators.artifact_validator import ArtifactValidationError
 
 
 SCHEMA_VERSION = 1
@@ -113,6 +119,44 @@ def read_json(path: Path) -> Any:
         return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise WorkflowError(f"JSON tidak valid pada {path.name}: {exc}") from None
+
+
+def gate_transcript(
+    payload: Any,
+    *,
+    source_path: Path,
+    artifact_path: Path,
+    config: dict[str, Any] | None = None,
+    upstream_artifacts: list[str] | None = None,
+) -> dict[str, Any]:
+    try:
+        return validate_transcript_contract(
+            payload,
+            source_path=source_path,
+            artifact_path=artifact_path,
+            config=config,
+            upstream_artifacts=upstream_artifacts,
+        )
+    except ArtifactValidationError as exc:
+        raise WorkflowError(f"Artifact transcript diblokir: {exc}") from None
+
+
+def gate_job_manifest(
+    payload: dict[str, Any],
+    *,
+    source_path: Path,
+    transcript_path: Path,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        return build_job_manifest_contract(
+            payload,
+            source_path=source_path,
+            transcript_path=transcript_path,
+            config=config,
+        )
+    except ArtifactValidationError as exc:
+        raise WorkflowError(f"Artifact job manifest diblokir: {exc}") from None
 
 
 def command_text(command: Iterable[str]) -> str:
@@ -326,6 +370,21 @@ def command_ingest(args: argparse.Namespace) -> int:
             cwd=project_root(),
         )
 
+    observe(args, "validating_artifact", "Memvalidasi kontrak transcript")
+    raw_transcript = read_json(transcript_path)
+    transcript_config = {
+        "model": args.model,
+        "language": args.language,
+    }
+    transcript = gate_transcript(
+        raw_transcript,
+        source_path=source,
+        artifact_path=transcript_path,
+        config=transcript_config,
+    )
+    if transcript != raw_transcript:
+        write_json(transcript_path, transcript)
+
     metadata = load_source_metadata(job_dir)
     observe(args, "saving_artifacts", "Menyimpan metadata dan rencana klip")
     job_payload = {
@@ -339,6 +398,12 @@ def command_ingest(args: argparse.Namespace) -> int:
         "title": metadata.get("title") or source.stem,
         "uploader": metadata.get("uploader") or metadata.get("channel"),
     }
+    job_payload = gate_job_manifest(
+        job_payload,
+        source_path=source,
+        transcript_path=transcript_path,
+        config=transcript_config,
+    )
     write_json(job_dir / "job.json", job_payload)
 
     plan_path = job_dir / "clip-plan.json"
@@ -1071,6 +1136,17 @@ def render_one_clip(
         clip["hook"],
         clip["headline"],
     )
+    sliced = gate_transcript(
+        sliced,
+        source_path=raw_video,
+        artifact_path=clip_transcript,
+        config={
+            "clip_id": clip["id"],
+            "start": clip["start"],
+            "end": clip["end"],
+        },
+        upstream_artifacts=[sha256_json(full_transcript)],
+    )
     write_json(clip_transcript, sliced)
 
     print(f"[{clip['id']}] Membuat hook dan subtitle cinematic...")
@@ -1626,9 +1702,18 @@ def command_render(args: argparse.Namespace) -> int:
         if unknown:
             raise WorkflowError("Clip ID tidak ada dalam rencana: " + ", ".join(unknown))
         selected_clips = [clip for clip in plan["clips"] if clip["id"] in requested]
-    full_transcript = read_json(full_transcript_path)
-    if not isinstance(full_transcript, dict):
-        raise WorkflowError("Transkrip sumber harus berupa object JSON.")
+    raw_transcript = read_json(full_transcript_path)
+    observe(args, "validating_artifact", "Memvalidasi kontrak transcript sumber")
+    full_transcript = gate_transcript(
+        raw_transcript,
+        source_path=source,
+        artifact_path=full_transcript_path,
+        config={"language": raw_transcript.get("language", "unknown")}
+        if isinstance(raw_transcript, dict)
+        else {},
+    )
+    if full_transcript != raw_transcript:
+        write_json(full_transcript_path, full_transcript)
 
     campaign_path, campaign_assignment, campaign_preflight = prepare_campaign(
         plan,

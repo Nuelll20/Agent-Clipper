@@ -3,23 +3,51 @@
   "title": "Hermes Scene Graph",
   "type": "object",
   "required": [
+    "artifact_type",
     "schema_version",
     "producer_version",
+    "source_fingerprint",
+    "config_fingerprint",
     "created_at",
+    "upstream_artifacts",
     "scenes"
   ],
   "properties": {
+    "artifact_type": {
+      "const": "scene-graph"
+    },
     "schema_version": {
-      "type": "string"
+      "const": "2.0"
     },
     "producer_version": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
+    },
+    "source_fingerprint": {
+      "$ref": "#/definitions/fingerprint"
+    },
+    "config_fingerprint": {
+      "$ref": "#/definitions/fingerprint"
     },
     "created_at": {
-      "type": "string"
+      "type": "string",
+      "format": "date-time"
+    },
+    "upstream_artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/fingerprint"
+      },
+      "uniqueItems": true
     },
     "scenes": {
       "type": "array"
+    }
+  },
+  "definitions": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   }
 }

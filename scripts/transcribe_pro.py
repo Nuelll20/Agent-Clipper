@@ -5,6 +5,11 @@ import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.artifacts import validate_transcript_contract
+
 MODEL_ROOT = PROJECT_ROOT / "models" / "faster-whisper"
 
 MODEL_ROOT.mkdir(parents=True, exist_ok=True)
@@ -176,6 +181,16 @@ def transcribe_video(
         ).strip(),
         "segments": output_segments
     }
+
+    result = validate_transcript_contract(
+        result,
+        source_path=input_path,
+        artifact_path=output_path,
+        config={
+            "model": model_name,
+            "language": language,
+        },
+    )
 
     with output_path.open(
         "w",

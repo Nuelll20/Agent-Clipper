@@ -1,33 +1,84 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Hermes Job Manifest",
+  "title": "Hermes Job Manifest Contract v2",
   "type": "object",
   "required": [
+    "artifact_type",
     "schema_version",
     "producer_version",
     "source_fingerprint",
     "config_fingerprint",
     "created_at",
-    "upstream_artifacts"
+    "upstream_artifacts",
+    "job_id",
+    "source_path",
+    "transcript_path",
+    "media"
   ],
   "properties": {
+    "artifact_type": {
+      "const": "job-manifest"
+    },
     "schema_version": {
-      "type": "string"
+      "const": "2.0"
     },
     "producer_version": {
-      "type": "string"
+      "type": "string",
+      "minLength": 1
     },
     "source_fingerprint": {
-      "type": "string"
+      "$ref": "#/definitions/fingerprint"
     },
     "config_fingerprint": {
-      "type": "string"
+      "$ref": "#/definitions/fingerprint"
     },
     "created_at": {
-      "type": "string"
+      "type": "string",
+      "format": "date-time"
     },
     "upstream_artifacts": {
-      "type": "array"
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/fingerprint"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transcript_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "media": {
+      "type": "object",
+      "required": ["width", "height", "duration"],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  },
+  "definitions": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
     }
   }
 }

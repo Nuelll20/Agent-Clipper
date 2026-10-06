@@ -32,6 +32,8 @@ tidak ada tombol pause/resume yang pura-pura menghentikan proses.
 Stage yang diamati meliputi download/reuse source, probe, transcribe/reuse
 transcript, penyimpanan artifact, validasi, clipping, subtitle, editorial/visual
 planning, motion rendering/fallback, final render, campaign dan pengiriman review.
+Perintah `deliver` membuat run `CLIP_DELIVER` terpisah sehingga retry Telegram
+tidak mengubah riwayat run render.
 
 `current/total` pada render menghitung klip berhasil diproses dari klip yang dipilih
 untuk invocation ini. Ia bukan persentase frame, durasi, atau estimasi waktu.
@@ -39,9 +41,11 @@ Klip gagal tidak menambah current; perintah continue-on-error tetap berakhir FAI
 jika ada kegagalan. Pada ingest, keduanya null karena belum ada total unit terukur.
 
 COMPLETED berarti perintah CLI selesai, bukan video disetujui atau dipublikasikan.
-Legacy render masih memasukkan pengiriman Telegram dalam keberhasilan klip;
-pemisahan produksi/delivery ada pada checkpoint C. Approval tetap dibaca dengan
-perintah `status` existing. Ingest selesai masih membutuhkan pengisian clip-plan.
+Status render dan delivery Telegram sudah dipisahkan. Kegagalan delivery membuat
+invocation berakhir FAILED agar terlihat oleh otomasi, tetapi klip pada manifest
+tetap `completed` dan dapat dikirim ulang tanpa render. Approval tetap dibaca
+dengan perintah `status` existing. Ingest selesai masih membutuhkan pengisian
+clip-plan.
 
 ## Menjalankan di Windows
 
@@ -58,6 +62,10 @@ Dari `D:\Hermes\video-agent` setelah perubahan ini diterapkan:
 
 # Ganti RUN_ID dengan ID yang dicetak saat produksi.
 & ".\.venv\Scripts\python.exe" scripts\podcast_clipper.py events --run RUN_ID
+
+# Retry Telegram dari artifact selesai, tanpa render ulang.
+& ".\.venv\Scripts\python.exe" scripts\podcast_clipper.py deliver `
+  --manifest jobs\JOB_ID\render-manifest.json
 
 # Replay sesudah sequence terakhir yang telah dibaca.
 & ".\.venv\Scripts\python.exe" scripts\podcast_clipper.py events `
@@ -85,7 +93,7 @@ menghentikan pekerjaan.
 Instrumen dipasang melalui `execute_observed()` yang dipanggil CLI main. Pemanggil
 Python yang memanggil command handler secara langsung harus memakai wrapper ini
 atau memasok observer sendiri. JSON lama, file output, dan behavior --no-send
-dipertahankan. Belum ada perubahan format artifact produksi.
+dipertahankan. Detail kontrak retry ada di `DELIVERY_WORKFLOW.md`.
 
 ## Verifikasi yang diperlukan
 

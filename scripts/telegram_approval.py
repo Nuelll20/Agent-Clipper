@@ -29,10 +29,17 @@ STATUS_PENDING = "pending"
 STATUS_APPROVED = "approved"
 STATUS_REJECTED = "rejected"
 STATUS_REVISION = "revision_requested"
+STATUS_SENDING = "sending"
+STATUS_SEND_FAILED = "send_failed"
+STATUS_SEND_UNCERTAIN = "send_uncertain"
 
 
 class ApprovalError(RuntimeError):
     """Expected configuration, storage, or Telegram API error."""
+
+
+class DeliveryUncertainError(ApprovalError):
+    """The request may have reached Telegram, so an automatic retry is unsafe."""
 
 
 def utc_now() -> str:
@@ -121,7 +128,8 @@ def connect_db(path: Path) -> sqlite3.Connection:
             message_id INTEGER,
             decision_by TEXT,
             decision_at TEXT,
-            error_message TEXT
+            error_message TEXT,
+            delivery_key TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_clips_job_id ON clips(job_id);
         CREATE INDEX IF NOT EXISTS idx_clips_status ON clips(status);
@@ -129,6 +137,18 @@ def connect_db(path: Path) -> sqlite3.Connection:
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+        """
+    )
+    columns = {
+        str(row["name"])
+        for row in connection.execute("PRAGMA table_info(clips)").fetchall()
+    }
+    if "delivery_key" not in columns:
+        connection.execute("ALTER TABLE clips ADD COLUMN delivery_key TEXT")
+    connection.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_delivery_key
+        ON clips(delivery_key) WHERE delivery_key IS NOT NULL
         """
     )
     connection.commit()
@@ -232,14 +252,18 @@ def telegram_upload_video(
         response = connection.getresponse()
         raw = response.read()
     except (OSError, http.client.HTTPException) as exc:
-        raise ApprovalError(f"Upload Telegram gagal: {exc}") from None
+        raise DeliveryUncertainError(
+            f"Upload Telegram terputus dan hasilnya belum pasti: {exc}"
+        ) from None
     finally:
         connection.close()
 
     try:
         data = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        raise ApprovalError("Respons upload Telegram tidak dapat dibaca.") from None
+        raise DeliveryUncertainError(
+            "Respons upload Telegram tidak dapat dibaca; hasil pengiriman belum pasti."
+        ) from None
     if response.status >= 400 or not data.get("ok"):
         description = str(data.get("description") or f"HTTP {response.status}")
         raise ApprovalError(f"Telegram menolak video: {description}")
@@ -280,6 +304,8 @@ def create_clip_record(
     clip_id: str,
     video_path: Path,
     caption: str,
+    delivery_key: str | None = None,
+    status: str = STATUS_PENDING,
 ) -> str:
     token = secrets.token_urlsafe(9)
     now = utc_now()
@@ -287,8 +313,8 @@ def create_clip_record(
         """
         INSERT INTO clips(
             token, job_id, clip_id, video_path, caption, status,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, delivery_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             token,
@@ -296,9 +322,10 @@ def create_clip_record(
             clip_id,
             str(video_path.resolve()),
             caption,
-            STATUS_PENDING,
+            status,
             now,
             now,
+            delivery_key,
         ),
     )
     connection.commit()
@@ -320,16 +347,53 @@ def command_send(args: argparse.Namespace) -> int:
         caption = caption_path.read_text(encoding="utf-8-sig")
     caption = compact_caption(caption or f"{args.clip} siap ditinjau.")
 
+    delivery_key = getattr(args, "delivery_key", None)
     config = merged_config(Path(args.env).expanduser())
     connection = connect_db(Path(args.state).expanduser())
     try:
-        token = create_clip_record(
-            connection,
-            job_id=args.job,
-            clip_id=args.clip,
-            video_path=video_path,
-            caption=caption,
-        )
+        existing = None
+        if delivery_key:
+            existing = connection.execute(
+                "SELECT * FROM clips WHERE delivery_key = ?",
+                (delivery_key,),
+            ).fetchone()
+        if existing is not None and existing["status"] in {
+            STATUS_SENDING,
+            STATUS_SEND_UNCERTAIN,
+        }:
+            raise ApprovalError(
+                "Status pengiriman sebelumnya belum pasti. Periksa Telegram terlebih "
+                "dahulu; gunakan deliver --force hanya jika video memang belum masuk."
+            )
+        if existing is not None and existing["status"] != STATUS_SEND_FAILED:
+            print("Video terkirim: True")
+            print("Pengiriman duplikat dilewati: True")
+            print(f"Job: {args.job}")
+            print(f"Clip: {args.clip}")
+            print(f"Status: {existing['status']}")
+            return 0
+        if existing is not None:
+            token = str(existing["token"])
+            connection.execute(
+                """
+                UPDATE clips
+                SET video_path = ?, caption = ?, status = ?, updated_at = ?,
+                    error_message = NULL
+                WHERE token = ?
+                """,
+                (str(video_path), caption, STATUS_SENDING, utc_now(), token),
+            )
+            connection.commit()
+        else:
+            token = create_clip_record(
+                connection,
+                job_id=args.job,
+                clip_id=args.clip,
+                video_path=video_path,
+                caption=caption,
+                delivery_key=delivery_key,
+                status=STATUS_SENDING,
+            )
         fields = {
             "chat_id": config["TELEGRAM_CHAT_ID"],
             "caption": caption,
@@ -343,28 +407,56 @@ def command_send(args: argparse.Namespace) -> int:
                 fields,
                 timeout=args.timeout,
             )
+        except DeliveryUncertainError as exc:
+            connection.execute(
+                """
+                UPDATE clips
+                SET status = ?, updated_at = ?, error_message = ?
+                WHERE token = ?
+                """,
+                (STATUS_SEND_UNCERTAIN, utc_now(), str(exc), token),
+            )
+            connection.commit()
+            raise
         except ApprovalError as exc:
             connection.execute(
                 """
                 UPDATE clips
-                SET status = 'send_failed', updated_at = ?, error_message = ?
+                SET status = ?, updated_at = ?, error_message = ?
                 WHERE token = ?
                 """,
-                (utc_now(), str(exc), token),
+                (STATUS_SEND_FAILED, utc_now(), str(exc), token),
             )
             connection.commit()
             raise
 
-        message = response["result"]
+        try:
+            message = response["result"]
+            chat_id = str(message["chat"]["id"])
+            message_id = int(message["message_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            detail = "Telegram menerima upload tetapi identitas pesan tidak valid."
+            connection.execute(
+                """
+                UPDATE clips
+                SET status = ?, updated_at = ?, error_message = ?
+                WHERE token = ?
+                """,
+                (STATUS_SEND_UNCERTAIN, utc_now(), detail, token),
+            )
+            connection.commit()
+            raise DeliveryUncertainError(detail) from exc
         connection.execute(
             """
             UPDATE clips
-            SET chat_id = ?, message_id = ?, updated_at = ?, error_message = NULL
+            SET chat_id = ?, message_id = ?, status = ?, updated_at = ?,
+                error_message = NULL
             WHERE token = ?
             """,
             (
-                str(message["chat"]["id"]),
-                int(message["message_id"]),
+                chat_id,
+                message_id,
+                STATUS_PENDING,
                 utc_now(),
                 token,
             ),
@@ -638,6 +730,10 @@ def build_parser() -> argparse.ArgumentParser:
     caption_group.add_argument("--caption", help="Caption video")
     caption_group.add_argument("--caption-file", help="File teks berisi caption")
     send_parser.add_argument("--timeout", type=int, default=300, help="Timeout upload dalam detik")
+    send_parser.add_argument(
+        "--delivery-key",
+        help="Kunci idempotensi agar retry tidak mengirim video yang sama dua kali",
+    )
     send_parser.set_defaults(handler=command_send)
 
     watch_parser = subparsers.add_parser("watch", help="Pantau tombol persetujuan")

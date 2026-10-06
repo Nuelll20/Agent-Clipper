@@ -1,4 +1,4 @@
-# Event/state foundation — checkpoint B, diperluas checkpoint D
+# Event/state foundation — checkpoint B, diperluas checkpoint D–E
 
 Fondasi awal mengamati pekerjaan clipper existing. Checkpoint D menambahkan
 Supervisor queue dan korelasi task/run. Dashboard dan WebSocket belum tersedia.
@@ -20,7 +20,10 @@ Supervisor queue dan korelasi task/run. Dashboard dan WebSocket belum tersedia.
 
 Payload mencakup schema_version, event_id, sequence, run_id, task_id, job_id,
 kind, agent_id, state, stage, message, current, total, unit, clip_id dan timestamp
-UTC. `agent_id=clipper` menunjukkan pipeline nyata, bukan agent LLM terpisah.
+UTC. Clipper memakai `agent_id=clipper`. Story development dapat mengganti
+`agent_id` per event (`worldbuilder`, `plotter`, `screenwriter`, `story-critic`,
+`continuity-editor`, dan `shot-planner`) dalam run yang sama. Progress story
+memakai `unit=stages`, sedangkan render tetap `unit=clips`.
 Event tidak menyimpan raw command, credential, atau isi exception; detail error
 tetap pada log developer existing.
 
@@ -36,6 +39,8 @@ transcript, penyimpanan artifact, validasi, clipping, subtitle, editorial/visual
 planning, motion rendering/fallback, final render, campaign dan pengiriman review.
 Perintah `deliver` membuat run `CLIP_DELIVER` terpisah sehingga retry Telegram
 tidak mengubah riwayat run render.
+Story review membuat run `STORY_REVIEW` terpisah. Critic/continuity yang meminta
+revisi berhenti pada `REVIEWING`; Supervisor menandai task `REVIEW_REQUIRED`.
 
 `current/total` pada render menghitung klip berhasil diproses dari klip yang dipilih
 untuk invocation ini. Ia bukan persentase frame, durasi, atau estimasi waktu.

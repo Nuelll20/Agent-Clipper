@@ -106,7 +106,8 @@ class EventStore:
     def record(
         self, run_id: str, state: str, stage: str, message: str,
         *, current: int | None = None, total: int | None = None,
-        clip_id: str | None = None,
+        clip_id: str | None = None, unit: str | None = None,
+        agent_id: str | None = None,
     ) -> dict[str, Any]:
         if state not in STATES:
             raise ValueError(f"Unknown state: {state}")
@@ -119,15 +120,22 @@ class EventStore:
             or current < 0 or total < 0 or current > total
         ):
             raise ValueError("progress requires integers: 0 <= current <= total")
+        if unit is not None and not str(unit).strip():
+            raise ValueError("unit cannot be empty")
+        if agent_id is not None and not str(agent_id).strip():
+            raise ValueError("agent_id cannot be empty")
         with self.connection:
             # Serialize the terminal-state check with the following write.
             self.connection.execute("BEGIN IMMEDIATE")
-            return self._append(run_id, state, stage, message, current, total, clip_id)
+            return self._append(
+                run_id, state, stage, message, current, total, clip_id, unit, agent_id,
+            )
 
     def _append(
         self, run_id: str, state: str, stage: str, message: str,
         current: int | None = None, total: int | None = None,
-        clip_id: str | None = None,
+        clip_id: str | None = None, unit: str | None = None,
+        agent_id: str | None = None,
     ) -> dict[str, Any]:
         row = self.connection.execute(
             "SELECT * FROM runs WHERE run_id = ?", (run_id,),
@@ -143,13 +151,14 @@ class EventStore:
             "task_id": row["task_id"] or run_id,
             "job_id": row["job_id"],
             "kind": row["kind"],
-            "agent_id": row["agent_id"] or "clipper",
+            "agent_id": str(agent_id or row["agent_id"] or "clipper").strip(),
             "state": state,
             "stage": stage,
             "message": message,
             "current": current,
             "total": total,
-            "unit": "clips" if total is not None else None,
+            "unit": (str(unit).strip() if unit is not None else "clips")
+            if total is not None else None,
             "clip_id": clip_id,
             "timestamp": utc_now(),
         }

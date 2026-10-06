@@ -1,0 +1,25 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Story Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "manifest_fingerprint", "decision", "reviewer", "note", "created_at"
+  ],
+  "properties": {
+    "artifact_type": {"const": "story-review"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "revision_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "manifest_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "decision": {"enum": ["APPROVED", "CHANGES_REQUESTED"]},
+    "reviewer": {"type": "string", "minLength": 1, "maxLength": 200},
+    "note": {"type": "string", "maxLength": 5000},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

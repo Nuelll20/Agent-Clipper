@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Story Brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "story_id", "title", "premise",
+    "language", "audience", "format", "target_duration_seconds", "constraints"
+  ],
+  "properties": {
+    "artifact_type": {"const": "story-brief"},
+    "schema_version": {"const": "2.0"},
+    "story_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200},
+    "premise": {"type": "string", "minLength": 1, "maxLength": 5000},
+    "language": {"type": "string", "minLength": 2, "maxLength": 20},
+    "audience": {"type": "string", "minLength": 1, "maxLength": 200},
+    "format": {"type": "string", "minLength": 1, "maxLength": 100},
+    "target_duration_seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 14400},
+    "constraints": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1, "maxLength": 1000},
+      "uniqueItems": true,
+      "maxItems": 100
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Story Stage Artifact",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "stage", "agent_id", "source_fingerprint",
+    "config_fingerprint", "created_at", "upstream_artifacts", "provider", "content"
+  ],
+  "properties": {
+    "artifact_type": {"type": "string", "pattern": "^story-(universe|outline|screenplay|critique|continuity|shot-list)$"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "revision_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$"},
+    "stage": {"enum": ["universe", "outline", "screenplay", "critique", "continuity", "shot-list"]},
+    "agent_id": {"type": "string", "minLength": 1},
+    "source_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "config_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "upstream_artifacts": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/fingerprint"},
+      "uniqueItems": true
+    },
+    "provider": {"type": "object", "minProperties": 1},
+    "content": {"type": "object", "minProperties": 1}
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

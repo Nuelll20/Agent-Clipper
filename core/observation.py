@@ -45,7 +45,8 @@ class RunObserver:
 
     def emit(
         self, stage: str, message: str, *, state: str = "WORKING",
-        clip_id: str | None = None,
+        clip_id: str | None = None, unit: str | None = None,
+        agent_id: str | None = None,
     ) -> None:
         if self.store is None:
             return
@@ -53,6 +54,7 @@ class RunObserver:
             self.store.record(
                 self.run_id, state, stage, message,
                 current=self.current, total=self.total, clip_id=clip_id,
+                unit=unit, agent_id=agent_id,
             )
         except (OSError, sqlite3.Error) as exc:
             self._disable(exc)

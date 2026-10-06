@@ -6,6 +6,7 @@ Agent-Clipper. Adapter `CLIP_VIDEO` tetap memanggil
 artifact gate, manifest, dan event existing tetap menjadi jalur produksi.
 Checkpoint E menambahkan adapter `DEVELOP_STORY` yang memanggil enam role melalui
 `scripts/story_studio.py`.
+Checkpoint F menambahkan `GENERATE_ASSETS` untuk generation/regeneration per shot.
 
 ## Penyimpanan dan identitas
 
@@ -55,6 +56,8 @@ ditulis dalam satu transaksi SQLite `BEGIN IMMEDIATE`.
    revision ID, tidak menyimpan API key, dan mengunci `story:<story_id>`.
 9. Critic `REVISE` atau continuity `BLOCKED` masuk `REVIEW_REQUIRED`; operator
    harus membuat brief/revisi baru, bukan memaksa retry artifact yang sama.
+10. `GENERATE_ASSETS` memverifikasi fingerprint plan. Regenerasi memakai ID
+    eksplisit yang stabil pada retry sehingga attempt tidak digandakan.
 
 Lock hanya berlaku jika pekerjaan masuk melalui Supervisor. Menjalankan
 `podcast_clipper.py render` langsung tetap didukung, tetapi dapat melewati queue
@@ -80,6 +83,15 @@ Dari `D:\Hermes\video-agent`:
 
 # Proses satu task lalu kembali ke prompt.
 & ".\.venv\Scripts\python.exe" scripts\supervisor.py worker --once
+
+# Antrekan semua asset shot atau regenerasi selektif.
+& ".\.venv\Scripts\python.exe" scripts\supervisor.py enqueue assets `
+  --plan "PATH\TO\asset-plan.json"
+
+& ".\.venv\Scripts\python.exe" scripts\supervisor.py enqueue assets `
+  --plan "PATH\TO\asset-plan.json" --shot shot-01 `
+  --asset reference --asset animation `
+  --regeneration-id "shot-01-take-02"
 
 # Worker terus hidup sampai Ctrl+C.
 & ".\.venv\Scripts\python.exe" scripts\supervisor.py worker
@@ -127,8 +139,8 @@ yang sama. Setelah penyebab diperbaiki, enqueue pekerjaan baru dengan
 
 Supervisor ini belum merupakan Windows Service, belum auto-start saat boot,
 dan belum memiliki pause/cancel process tree. Queue menyediakan adapter
-`CLIP_VIDEO` dan `DEVELOP_STORY`; image/video generation, voice, audio, assembly,
-QA, dan publisher akan menjadi adapter terpisah pada checkpoint berikutnya.
+`CLIP_VIDEO`, `DEVELOP_STORY`, dan `GENERATE_ASSETS`; assembly, technical QA,
+publisher, dan analytics akan menjadi adapter pada checkpoint berikutnya.
 
 Recovery lease tidak menebak apakah PID lama masih hidup. Karena itu task crash
 diblokir untuk inspeksi, bukan auto-resume. Dashboard belum tersedia; output JSON

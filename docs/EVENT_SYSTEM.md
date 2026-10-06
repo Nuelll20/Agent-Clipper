@@ -41,6 +41,9 @@ Perintah `deliver` membuat run `CLIP_DELIVER` terpisah sehingga retry Telegram
 tidak mengubah riwayat run render.
 Story review membuat run `STORY_REVIEW` terpisah. Critic/continuity yang meminta
 revisi berhenti pada `REVIEWING`; Supervisor menandai task `REVIEW_REQUIRED`.
+Asset generation membuat run `ASSET_GENERATION`, memakai `unit=assets`, dan
+agent ID `reference-artist`, `animator`, `voice-director`, atau `sound-designer`.
+Stage mengandung kind dan shot ID, misalnya `animation:shot-01`.
 
 `current/total` pada render menghitung klip berhasil diproses dari klip yang dipilih
 untuk invocation ini. Ia bukan persentase frame, durasi, atau estimasi waktu.

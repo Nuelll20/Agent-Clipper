@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Voice Cast",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "story_manifest_fingerprint", "created_at", "voices"
+  ],
+  "properties": {
+    "artifact_type": {"const": "voice-cast"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "minLength": 1},
+    "revision_id": {"type": "string", "minLength": 1},
+    "story_manifest_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "voices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "character_id", "provider", "provider_voice_id", "language", "style",
+          "reference_path", "reference_fingerprint"
+        ],
+        "properties": {
+          "character_id": {"type": "string", "minLength": 1},
+          "provider": {"type": "string", "minLength": 1},
+          "provider_voice_id": {"type": "string", "minLength": 1},
+          "language": {"type": "string", "minLength": 2},
+          "style": {"type": "string", "minLength": 1},
+          "reference_path": {"type": ["string", "null"]},
+          "reference_fingerprint": {
+            "anyOf": [{"$ref": "#/definitions/fingerprint"}, {"type": "null"}]
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

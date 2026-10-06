@@ -155,3 +155,9 @@ lineage/fingerprint per stage, critique dan continuity gate, review yang terikat
 ke revisi, event agent, serta adapter Supervisor `DEVELOP_STORY`. Provider awal
 memakai endpoint Chat Completions OpenAI-compatible; provider fixture hanya untuk
 tes offline. Assets dan animasi tetap berada di Checkpoint F.
+
+Pembaruan Checkpoint F: branch `feat/assets-animation-audio` menambahkan voice
+cast, plan per shot, immutable asset attempts, reference-dependent animation,
+provider command lokal, SFX/voice request, selective regeneration idempotent,
+event agent, dan adapter Supervisor `GENERATE_ASSETS`. Media fixture bukan output
+produksi; integrasi model lokal nyata tetap perlu diverifikasi di Windows.

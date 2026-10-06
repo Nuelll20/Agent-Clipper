@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hermes Asset Attempt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_type", "schema_version", "producer_version", "story_id",
+    "revision_id", "production_id", "shot_id", "kind", "attempt_id",
+    "input_fingerprint", "regeneration_key", "dependency_artifacts", "provider", "state",
+    "created_at", "finished_at", "request_path", "request_fingerprint", "output", "error"
+  ],
+  "properties": {
+    "artifact_type": {"const": "asset-attempt"},
+    "schema_version": {"const": "2.0"},
+    "producer_version": {"type": "string", "minLength": 1},
+    "story_id": {"type": "string", "minLength": 1},
+    "revision_id": {"type": "string", "minLength": 1},
+    "production_id": {"type": "string", "minLength": 1},
+    "shot_id": {"type": "string", "minLength": 1},
+    "kind": {"enum": ["reference", "animation", "voice", "sfx"]},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "input_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "regeneration_key": {"type": ["string", "null"]},
+    "dependency_artifacts": {
+      "type": "array", "items": {"$ref": "#/definitions/fingerprint"}, "uniqueItems": true
+    },
+    "provider": {"type": "object", "minProperties": 1},
+    "state": {"enum": ["COMPLETED", "FAILED"]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "request_path": {"type": "string", "minLength": 1},
+    "request_fingerprint": {"$ref": "#/definitions/fingerprint"},
+    "output": {
+      "anyOf": [
+        {"type": "null"},
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["path", "fingerprint", "size_bytes"],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "fingerprint": {"$ref": "#/definitions/fingerprint"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "error": {"type": ["string", "null"]}
+  },
+  "definitions": {
+    "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

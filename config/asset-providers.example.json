@@ -1,0 +1,54 @@
+{
+  "artifact_type": "asset-provider-config",
+  "schema_version": "1.0",
+  "providers": {
+    "reference": {
+      "name": "local-reference-provider",
+      "command": [
+        "C:\\path\\to\\reference-provider.exe",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
+      "output_extension": ".png",
+      "timeout_seconds": 900
+    },
+    "animation": {
+      "name": "local-animation-provider",
+      "command": [
+        "C:\\path\\to\\animation-provider.exe",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
+      "output_extension": ".mp4",
+      "timeout_seconds": 3600
+    },
+    "voice": {
+      "name": "local-voice-provider",
+      "command": [
+        "C:\\path\\to\\voice-provider.exe",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
+      "output_extension": ".wav",
+      "timeout_seconds": 900
+    },
+    "sfx": {
+      "name": "local-sfx-provider",
+      "command": [
+        "C:\\path\\to\\sfx-provider.exe",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
+      "output_extension": ".wav",
+      "timeout_seconds": 900
+    }
+  }
+}

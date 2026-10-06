@@ -3,8 +3,8 @@
 ## Acuan
 
 Repository: https://github.com/Nuelll20/Agent-Clipper.
-Baseline: `f7d3cff` di main, hasil merge PR #4 Supervisor minimal.
-Branch pekerjaan: `feat/story-pipeline`.
+Baseline: `07e4ff1` di main, hasil merge PR #5 story pipeline.
+Branch pekerjaan: `feat/assets-animation-audio`.
 
 Source of truth tujuan: handoff pengguna, evolusi clipper existing menuju
 AI Workforce + Animation Studio + AI Office. Clipper harus tetap berfungsi.
@@ -42,6 +42,14 @@ Perubahan checkpoint ini belum di-push ke GitHub.
   artifact berubah sesudah review.
 - Adapter Supervisor `DEVELOP_STORY` memakai brief fingerprint dan tidak
   menyimpan API key provider.
+- Checkpoint E sudah di-merge melalui PR #5 dan lulus 72 tes di Windows.
+- Voice cast mengunci identitas suara seluruh karakter pada story revision.
+- Asset plan memecah reference, animation, optional voice, dan SFX per shot.
+- Attempt immutable menyimpan fingerprint request/output/dependency.
+- Regenerasi selektif memakai ID stabil sehingga retry tidak menggandakan take.
+- Reference baru membuat animation lama stale tanpa mengulang shot lain.
+- Provider command lokal tidak memakai shell dan secret tetap di environment.
+- Adapter Supervisor `GENERATE_ASSETS` menjalankan generation tanpa delivery.
 
 ## File berubah
 
@@ -69,13 +77,19 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 | `artifacts/schemas/story-*.schema.json` | Kontrak brief, stage, manifest, dan review |
 | `tests/test_story_pipeline.py` | Gate, resume, tamper, approval, event, dan adapter Supervisor |
 | `docs/STORY_PIPELINE.md` | Operasi dan batas Checkpoint E |
+| `core/production.py` | Voice cast, plan, provider, attempts, manifest, selective regeneration |
+| `scripts/animation_studio.py` | CLI cast/prepare/generate/validate |
+| `artifacts/schemas/asset-*.schema.json` | Kontrak provider, plan, attempt, dan manifest |
+| `artifacts/schemas/voice-cast.schema.json` | Kontrak identitas suara karakter |
+| `tests/test_asset_pipeline.py` | Approval, lineage, failure, provider, dan regenerasi |
+| `docs/ASSET_PIPELINE.md` | Operasi dan batas Checkpoint F |
 
 ## Verifikasi
 
-Verifikasi branch story pada Linux: **71 passed, 1 skipped**. Skip merupakan tes
-font produksi Windows. Tes targeted story/Supervisor/event: **44 passed**.
-Integrasi offline Supervisor → subprocess → enam agent fixture → manifest juga
-lulus. Tes tidak memakai model kreatif atau render produksi.
+Verifikasi branch asset pada Linux: **87 passed, 1 skipped**. Skip merupakan tes
+font produksi Windows. Tes targeted asset/story/Supervisor/event: **60 passed**.
+Integrasi offline Supervisor menjalankan generation awal dan regenerasi selektif
+sebagai subprocess. Tes tidak memakai model media produksi.
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m pytest -q
@@ -88,9 +102,8 @@ Remotion, font Windows, atau Telegram live.
 
 ## Langkah berikutnya
 
-Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint E selesai. Berikutnya
-Checkpoint F membangun reference asset per shot, provider animation abstraction,
-voice identity, dan SFX dengan selective regeneration per shot.
+Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint F selesai. Berikutnya
+Checkpoint G membangun assembly timeline dan technical QA atas media nyata.
 
 Task dengan heartbeat mati direkonsiliasi ke `RECOVERY_REQUIRED`, tetapi tidak
 auto-resume. Pastikan proses lama berhenti sebelum retry manual. Lock hanya berlaku

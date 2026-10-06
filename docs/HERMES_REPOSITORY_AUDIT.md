@@ -6,6 +6,11 @@ Audit ini menggantikan audit awal ZIP 28 September. Perubahan yang hanya ada
 di laptop pengguna tidak termasuk cakupan. Handoff Clipper → Animation Studio
 dalam percakapan menjadi arah pengembangan.
 
+Pembaruan 6 Oktober 2026: event/state sudah di-merge melalui PR #1 dan pemisahan
+render/delivery melalui PR #2. Branch `feat/artifact-contract-gate` menyelesaikan
+dua temuan kontrak artifact P1 dengan adapter legacy dan gate fail-closed; detail
+implementasi ada di `ARTIFACT_CONTRACT.md`.
+
 ## 1. Struktur dan entry point
 
 | Lokasi | Peran aktual |
@@ -133,3 +138,7 @@ Telegram atau publikasi YouTube yang dilakukan selama audit.
 Checkpoint B mulai dari observabilitas. Ia belum menjanjikan auto-resume,
 cancellation, task scheduling, atau API/WebSocket. Implementasi bertahap ini
 mempertahankan urutan event-first dalam handoff.
+
+Status 6 Oktober 2026: implementasi Checkpoint C lulus **43 tes**, dengan satu
+tes font Windows dilewati di Linux. Verifikasi Windows tetap diperlukan sebelum
+merge. Checkpoint berikutnya adalah D — Supervisor minimal.

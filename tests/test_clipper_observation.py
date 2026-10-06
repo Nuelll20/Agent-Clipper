@@ -77,7 +77,16 @@ def test_render_batch_counts_successes_and_preserves_failure_manifest(tmp_path, 
     source = tmp_path / "source.mp4"
     source.write_bytes(b"fixture")
     transcript = tmp_path / "transcript.json"
-    transcript.write_text('{"segments": []}')
+    transcript.write_text(json.dumps({
+        "language": "id",
+        "duration": 20,
+        "segments": [{
+            "id": 1,
+            "start": 0,
+            "end": 20,
+            "text": "Fixture transcript untuk dua klip.",
+        }],
+    }))
     plan_path = tmp_path / "clip-plan.json"
     plan_path.write_text(json.dumps({
         "job_id": "batch", "source_path": str(source), "transcript_path": str(transcript),

@@ -26,7 +26,19 @@ def build_render_fixture(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"source")
     transcript = tmp_path / "transcript.json"
-    transcript.write_text('{"segments": []}', encoding="utf-8")
+    transcript.write_text(
+        json.dumps({
+            "language": "id",
+            "duration": 10,
+            "segments": [{
+                "id": 1,
+                "start": 0,
+                "end": 10,
+                "text": "Fixture transcript untuk klip pengiriman.",
+            }],
+        }),
+        encoding="utf-8",
+    )
     plan = tmp_path / "clip-plan.json"
     plan.write_text(
         json.dumps({

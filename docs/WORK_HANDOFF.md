@@ -3,8 +3,8 @@
 ## Acuan
 
 Repository: https://github.com/Nuelll20/Agent-Clipper.
-Baseline: `07e4ff1` di main, hasil merge PR #5 story pipeline.
-Branch pekerjaan: `feat/assets-animation-audio`.
+Baseline: `68d75ec` di main, hasil merge PR #6 asset pipeline.
+Branch pekerjaan: `feat/comfyui-reference-provider`.
 
 Source of truth tujuan: handoff pengguna, evolusi clipper existing menuju
 AI Workforce + Animation Studio + AI Office. Clipper harus tetap berfungsi.
@@ -50,6 +50,12 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 - Reference baru membuat animation lama stale tanpa mengulang shot lain.
 - Provider command lokal tidak memakai shell dan secret tetap di environment.
 - Adapter Supervisor `GENERATE_ASSETS` menjalankan generation tanpa delivery.
+- ComfyUI 0.39.0, SDXL base, CLIP Vision, dan IP-Adapter telah diverifikasi pada
+  RTX 4060 Laptop 8 GB melalui API lokal `127.0.0.1:8188` dalam mode low-VRAM.
+- Bridge command reference ComfyUI membangun workflow SDXL atau IP-Adapter,
+  memverifikasi reference hash, dan mengambil PNG hasil ke attempt Checkpoint F.
+- Health check bridge memvalidasi checkpoint serta model/node IP-Adapter langsung
+  melalui metadata ComfyUI sebelum production dijalankan.
 
 ## File berubah
 
@@ -83,13 +89,17 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 | `artifacts/schemas/voice-cast.schema.json` | Kontrak identitas suara karakter |
 | `tests/test_asset_pipeline.py` | Approval, lineage, failure, provider, dan regenerasi |
 | `docs/ASSET_PIPELINE.md` | Operasi dan batas Checkpoint F |
+| `scripts/providers/comfyui_reference.py` | Provider reference SDXL/IP-Adapter melalui API lokal ComfyUI |
+| `config/asset-providers.comfyui.example.json` | Template command provider ComfyUI tanpa secret |
+| `tests/test_comfyui_reference_provider.py` | Workflow, validasi, hash, dan output atomic bridge |
 
 ## Verifikasi
 
-Verifikasi branch asset pada Linux: **87 passed, 1 skipped**. Skip merupakan tes
-font produksi Windows. Tes targeted asset/story/Supervisor/event: **60 passed**.
-Integrasi offline Supervisor menjalankan generation awal dan regenerasi selektif
-sebagai subprocess. Tes tidak memakai model media produksi.
+Verifikasi baseline asset pada Linux: **87 passed, 1 skipped**. Skip merupakan tes
+font produksi Windows. Bridge ComfyUI menambah enam tes stdlib untuk workflow SDXL,
+workflow IP-Adapter, validasi input/hash, output atomic, upload, polling history,
+dan download `/view`. Integrasi offline Supervisor menjalankan generation awal dan
+regenerasi selektif sebagai subprocess.
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m pytest -q
@@ -102,8 +112,9 @@ Remotion, font Windows, atau Telegram live.
 
 ## Langkah berikutnya
 
-Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint F selesai. Berikutnya
-Checkpoint G membangun assembly timeline dan technical QA atas media nyata.
+Verifikasi bridge ComfyUI di laptop dan generate satu reference melalui asset plan.
+Sesudah provider video, TTS, dan SFX nyata dipilih, Checkpoint G membangun assembly
+timeline dan technical QA atas media nyata.
 
 Task dengan heartbeat mati direkonsiliasi ke `RECOVERY_REQUIRED`, tetapi tidak
 auto-resume. Pastikan proses lama berhenti sebelum retry manual. Lock hanya berlaku

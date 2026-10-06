@@ -1,0 +1,41 @@
+{
+  "artifact_type": "asset-provider-config",
+  "schema_version": "1.0",
+  "providers": {
+    "reference": {
+      "name": "comfyui-sdxl-reference",
+      "command": [
+        "C:\\path\\to\\Agent-Clipper\\.venv\\Scripts\\python.exe",
+        "C:\\path\\to\\Agent-Clipper\\scripts\\providers\\comfyui_reference.py",
+        "--server",
+        "http://127.0.0.1:8188",
+        "--checkpoint",
+        "sd_xl_base_1.0.safetensors",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
+      "output_extension": ".png",
+      "timeout_seconds": 900
+    },
+    "animation": {
+      "name": "configure-real-animation-provider",
+      "command": ["C:\\path\\to\\animation-provider.exe"],
+      "output_extension": ".mp4",
+      "timeout_seconds": 3600
+    },
+    "voice": {
+      "name": "configure-real-voice-provider",
+      "command": ["C:\\path\\to\\voice-provider.exe"],
+      "output_extension": ".wav",
+      "timeout_seconds": 900
+    },
+    "sfx": {
+      "name": "configure-real-sfx-provider",
+      "command": ["C:\\path\\to\\sfx-provider.exe"],
+      "output_extension": ".wav",
+      "timeout_seconds": 900
+    }
+  }
+}

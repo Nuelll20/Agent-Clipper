@@ -47,6 +47,43 @@ Mode `fixture` hanya menulis byte deterministik untuk test orchestration. File
 berekstensi PNG/MP4/WAV dari fixture **bukan media valid** dan tidak boleh dipakai
 sebagai hasil produksi.
 
+### Bridge reference ComfyUI
+
+Repository menyediakan bridge nyata untuk asset `reference` di
+`scripts/providers/comfyui_reference.py`. Bridge membaca request Checkpoint F,
+mengirim workflow SDXL ke ComfyUI lokal, menunggu history selesai, mengunduh PNG
+melalui endpoint `/view`, lalu menulis output attempt secara atomik. Server selain
+loopback ditolak agar ComfyUI tidak terbuka ke jaringan tanpa sengaja.
+
+Health check SDXL:
+
+```powershell
+& ".\.venv\Scripts\python.exe" scripts\providers\comfyui_reference.py `
+  --server "http://127.0.0.1:8188" `
+  --checkpoint "sd_xl_base_1.0.safetensors" `
+  --require-ipadapter `
+  --health-check
+```
+
+Salin `config/asset-providers.comfyui.example.json` menjadi
+`config/asset-providers.local.json`, lalu perbaiki kedua path pada command
+`reference`. Tiga provider lain sengaja tetap berupa placeholder sampai provider
+video, TTS, dan SFX nyata dipasang. Karena itu, konfigurasi ini aman dipakai lebih
+dahulu dengan generation selektif `--asset reference`; jangan menjalankan semua
+kind sebelum ketiga provider lain siap.
+
+IP-Adapter bersifat opsional. Tambahkan argumen berikut pada command `reference`:
+
+```json
+"--reference-image", "E:\\path\\to\\immutable-reference.png",
+"--reference-sha256", "HEX_SHA256_TANPA_PREFIX"
+```
+
+Bridge mengunggah file ke input ComfyUI dengan nama berbasis hash, memverifikasi
+hash sebelum setiap generation, lalu memakai `IPAdapterAdvanced`. Hash wajib agar
+perubahan file referensi tidak lolos diam-diam. Perubahan command atau hash juga
+mengubah fingerprint provider config dan mewajibkan asset plan baru.
+
 ## 1. Voice cast
 
 Buat JSON assignment, misalnya `productions/voice-assignments.json`:

@@ -67,8 +67,9 @@ Untuk pemeriksaan semantic lengkap, jalankan jalur `ingest` atau `render`.
 Fingerprint canonical divalidasi bentuknya, tetapi belum dibandingkan kembali
 dengan isi source/config pada setiap reuse. Karena itu perubahan source atau
 opsi transcriber belum otomatis menginvalidasi artifact canonical existing.
-Kebijakan invalidasi, lock satu writer per job, attempt isolation, dan recovery
-worker tetap menjadi pekerjaan Supervisor checkpoint berikutnya.
+Supervisor checkpoint D menyediakan lock satu writer per job/resource dan
+recovery lease untuk pekerjaan yang masuk queue. Kebijakan invalidasi fingerprint
+dan attempt-isolated staging artifact masih belum diterapkan.
 
 Gate ini belum mencakup semua artifact editor, render manifest, EDL, QA report,
 atau scene graph produksi. Jangan menyimpulkan seluruh pipeline memiliki kontrak

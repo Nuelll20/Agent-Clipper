@@ -142,3 +142,9 @@ mempertahankan urutan event-first dalam handoff.
 Status 6 Oktober 2026: implementasi Checkpoint C lulus **43 tes**, dengan satu
 tes font Windows dilewati di Linux. Verifikasi Windows tetap diperlukan sebelum
 merge. Checkpoint berikutnya adalah D — Supervisor minimal.
+
+Pembaruan checkpoint D: branch `feat/supervisor-minimal` menambahkan queue task
+SQLite, idempotent enqueue, lease job/resource, heartbeat fencing, bounded retry,
+crash recovery ke `RECOVERY_REQUIRED`, dan adapter `CLIP_VIDEO` yang selalu
+memakai `--no-send`. Candidate ini lulus **54 tes** dengan satu tes font Windows
+dilewati di Linux; verifikasi Windows dan merge masih diperlukan.

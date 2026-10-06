@@ -68,3 +68,41 @@ def test_invalid_progress_does_not_change_history(tmp_path, current, total):
         assert len(store.read_events()) == 1
     finally:
         store.close()
+
+
+def test_existing_event_database_gets_task_identity_columns(tmp_path):
+    path = tmp_path / "legacy-events.db"
+    connection = sqlite3.connect(path)
+    connection.executescript("""
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            state TEXT NOT NULL,
+            snapshot TEXT NOT NULL
+        );
+        CREATE TABLE events (
+            sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL UNIQUE,
+            run_id TEXT NOT NULL REFERENCES runs(run_id),
+            payload TEXT NOT NULL
+        );
+    """)
+    connection.execute(
+        "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
+        ("run-old", "job", "CLIP_RENDER", "earlier", "STARTING", "{}"),
+    )
+    connection.commit()
+    connection.close()
+
+    store = EventStore(path)
+    try:
+        migrated = store.connection.execute(
+            "SELECT task_id, agent_id FROM runs WHERE run_id = 'run-old'"
+        ).fetchone()
+        assert dict(migrated) == {"task_id": "run-old", "agent_id": "clipper"}
+        run = store.start_run("job", "CLIP_RENDER", task_id="task-new")
+        assert store.read_events(run)[0]["task_id"] == "task-new"
+    finally:
+        store.close()

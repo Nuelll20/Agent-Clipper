@@ -34,8 +34,10 @@ class EventStore:
         self.connection.executescript("""
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
+                task_id TEXT,
                 job_id TEXT NOT NULL,
                 kind TEXT NOT NULL,
+                agent_id TEXT,
                 created_at TEXT NOT NULL,
                 state TEXT NOT NULL,
                 snapshot TEXT NOT NULL
@@ -49,19 +51,54 @@ class EventStore:
             CREATE INDEX IF NOT EXISTS events_run ON events(run_id, sequence);
             CREATE INDEX IF NOT EXISTS runs_job ON runs(job_id, created_at);
         """)
+        self._migrate_runs()
+
+    def _migrate_runs(self) -> None:
+        columns = {
+            row["name"]
+            for row in self.connection.execute("PRAGMA table_info(runs)")
+        }
+        with self.connection:
+            if "task_id" not in columns:
+                self.connection.execute("ALTER TABLE runs ADD COLUMN task_id TEXT")
+            if "agent_id" not in columns:
+                self.connection.execute("ALTER TABLE runs ADD COLUMN agent_id TEXT")
+            self.connection.execute(
+                "UPDATE runs SET task_id = run_id WHERE task_id IS NULL OR task_id = ''"
+            )
+            self.connection.execute(
+                "UPDATE runs SET agent_id = 'clipper' WHERE agent_id IS NULL OR agent_id = ''"
+            )
+            self.connection.execute(
+                "CREATE INDEX IF NOT EXISTS runs_task ON runs(task_id, created_at)"
+            )
 
     def close(self) -> None:
         self.connection.close()
 
-    def start_run(self, job_id: str, kind: str) -> str:
-        if not job_id or not kind:
-            raise ValueError("job_id and kind are required")
+    def start_run(
+        self,
+        job_id: str,
+        kind: str,
+        *,
+        task_id: str | None = None,
+        agent_id: str = "clipper",
+    ) -> str:
+        if not job_id or not kind or not agent_id:
+            raise ValueError("job_id, kind, and agent_id are required")
         run_id = "run_" + uuid.uuid4().hex
+        task_id = str(task_id or run_id).strip()
+        if not task_id:
+            raise ValueError("task_id cannot be empty")
         timestamp = utc_now()
         with self.connection:
             self.connection.execute(
-                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?)",
-                (run_id, job_id, kind, timestamp, "STARTING", "{}"),
+                """
+                INSERT INTO runs
+                    (run_id, task_id, job_id, kind, agent_id, created_at, state, snapshot)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, task_id, job_id, kind, agent_id, timestamp, "STARTING", "{}"),
             )
             self._append(run_id, "STARTING", "starting", "Starting production run")
         return run_id
@@ -103,10 +140,10 @@ class EventStore:
             "schema_version": 1,
             "event_id": "evt_" + uuid.uuid4().hex,
             "run_id": run_id,
-            "task_id": run_id,
+            "task_id": row["task_id"] or run_id,
             "job_id": row["job_id"],
             "kind": row["kind"],
-            "agent_id": "clipper",
+            "agent_id": row["agent_id"] or "clipper",
             "state": state,
             "stage": stage,
             "message": message,
@@ -127,14 +164,26 @@ class EventStore:
         )
         return event
 
-    def list_runs(self, job_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    def list_runs(
+        self,
+        job_id: str | None = None,
+        limit: int = 20,
+        *,
+        task_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("limit must be between 1 and 1000")
         query = "SELECT snapshot FROM runs"
+        clauses: list[str] = []
         parameters: list[Any] = []
         if job_id is not None:
-            query += " WHERE job_id = ?"
+            clauses.append("job_id = ?")
             parameters.append(job_id)
+        if task_id is not None:
+            clauses.append("task_id = ?")
+            parameters.append(task_id)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY rowid DESC LIMIT ?"
         parameters.append(limit)
         return [json.loads(row[0]) for row in self.connection.execute(query, parameters)]

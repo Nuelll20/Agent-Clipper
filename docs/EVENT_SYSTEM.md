@@ -1,7 +1,7 @@
-# Event/state foundation — checkpoint B
+# Event/state foundation — checkpoint B, diperluas checkpoint D
 
-Fondasi ini mengamati pekerjaan clipper existing. Ia belum menjalankan
-Supervisor, scheduler, dashboard, WebSocket, atau proses pemulihan otomatis.
+Fondasi awal mengamati pekerjaan clipper existing. Checkpoint D menambahkan
+Supervisor queue dan korelasi task/run. Dashboard dan WebSocket belum tersedia.
 
 ## Penyimpanan dan identitas
 
@@ -9,11 +9,13 @@ Supervisor, scheduler, dashboard, WebSocket, atau proses pemulihan otomatis.
 - Override melalui `HERMES_EVENT_DB` atau `--event-db` pada subcommand terkait.
 - `job_id` menghubungkan pekerjaan pengguna. `run_id` unik untuk setiap invocation
   ingest/render; menjalankan ulang job tidak menimpa riwayat sebelumnya.
-- `task_id` sementara sama dengan run_id. Subtask per shot belum diterapkan.
+- Untuk CLI langsung, `task_id` tetap sama dengan `run_id`. Invocation dari
+  Supervisor menerima `task_id` durable melalui `--task-id`; bounded retry
+  membuat `run_id` baru tanpa mengganti identitas task.
 - `events` berisi event append-only dengan sequence global; `runs` berisi snapshot
   event terakhir. Keduanya ditulis dalam satu transaksi SQLite.
-- SQLite WAL dan timeout 5 detik digunakan untuk akses antarproses. Ini tidak
-  membuat file render/manifest existing aman untuk parallel writer pada job sama.
+- SQLite WAL dan timeout 5 detik digunakan untuk akses antarproses. Supervisor
+  menambahkan lease job/resource; perintah CLI langsung tetap melewati lock ini.
 - State terminal COMPLETED/FAILED tidak dapat diubah. Retry membuat run baru.
 
 Payload mencakup schema_version, event_id, sequence, run_id, task_id, job_id,
@@ -76,6 +78,12 @@ Dari `D:\Hermes\video-agent` setelah perubahan ini diterapkan:
 akan dibuat sebagai database kosong. UI kelak perlu menyimpan cursor terakhir,
 membaca snapshot, lalu replay berdasarkan sequence untuk reconnect.
 
+Run dapat difilter memakai task Supervisor:
+
+```powershell
+& ".\.venv\Scripts\python.exe" scripts\podcast_clipper.py runs --task TASK_ID
+```
+
 ## Kegagalan dan batas checkpoint
 
 Jika database tidak dapat dibuka/ditulis, observer mencetak warning dan dinonaktifkan
@@ -85,10 +93,10 @@ worker masih hidup hanya dari state WORKING/STARTING. Mati listrik, SIGKILL,
 atau penghentian paksa belum direkonsiliasi. Heartbeat/lease akan ditambahkan
 bersama worker supervisor, sebelum dashboard mengklaim status live.
 
-State disimpan lintas proses, tetapi pekerjaan yang terputus belum dilanjutkan
-otomatis. Eksekusi tetap dimiliki proses CLI. Membuka/menutup UI nanti tidak
-boleh mengendalikan lifetime worker; menutup terminal CLI saat ini masih dapat
-menghentikan pekerjaan.
+Task Supervisor disimpan lintas proses. Lease kedaluwarsa direkonsiliasi menjadi
+`RECOVERY_REQUIRED`, bukan dilanjutkan otomatis, karena proses lama mungkin masih
+hidup. Detail queue, heartbeat, retry, dan recovery ada di `SUPERVISOR.md`.
+Membuka/menutup UI nanti tidak boleh mengendalikan lifetime worker.
 
 Instrumen dipasang melalui `execute_observed()` yang dipanggil CLI main. Pemanggil
 Python yang memanggil command handler secara langsung harus memakai wrapper ini

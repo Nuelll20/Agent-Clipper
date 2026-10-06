@@ -10,14 +10,27 @@ from core.event_store import EventStore
 
 
 class RunObserver:
-    def __init__(self, path: Path, job_id: str, kind: str):
+    def __init__(
+        self,
+        path: Path,
+        job_id: str,
+        kind: str,
+        *,
+        task_id: str | None = None,
+        agent_id: str = "clipper",
+    ):
         self.store: EventStore | None = None
         self.run_id: str | None = None
         self.current: int | None = None
         self.total: int | None = None
         try:
             self.store = EventStore(path)
-            self.run_id = self.store.start_run(job_id, kind)
+            self.run_id = self.store.start_run(
+                job_id,
+                kind,
+                task_id=task_id,
+                agent_id=agent_id,
+            )
             print(f"Production run: {self.run_id}")
         except (OSError, sqlite3.Error) as exc:
             self._disable(exc)

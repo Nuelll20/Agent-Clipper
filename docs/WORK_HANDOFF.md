@@ -3,8 +3,8 @@
 ## Acuan
 
 Repository: https://github.com/Nuelll20/Agent-Clipper.
-Baseline: `eb5596b` di main, hasil merge PR #2 render/delivery separation.
-Branch pekerjaan: `feat/artifact-contract-gate`.
+Baseline: `13275c6` di main, hasil merge PR #3 artifact contract gate.
+Branch pekerjaan: `feat/supervisor-minimal`.
 
 Source of truth tujuan: handoff pengguna, evolusi clipper existing menuju
 AI Workforce + Animation Studio + AI Office. Clipper harus tetap berfungsi.
@@ -27,6 +27,12 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 - Gate transcript aktif pada ingest, awal render, dan transcript per klip.
 - `job.json` memakai kontrak dan schema v2 tervalidasi.
 - Panduan kontrak: `ARTIFACT_CONTRACT.md`.
+- Checkpoint C sudah di-merge melalui PR #3 dan lulus 44 tes di Windows.
+- Queue task Supervisor tersimpan di SQLite dan enqueue bersifat idempotent.
+- Lease job/resource mencegah dua worker Supervisor menulis job yang sama.
+- Heartbeat memagari ownership; lease mati menjadi `RECOVERY_REQUIRED`.
+- Retry proses memakai backoff dan berhenti pada `max_attempts`.
+- Adapter `CLIP_VIDEO` memakai renderer existing dengan `--no-send`.
 
 ## File berubah
 
@@ -45,12 +51,16 @@ Perubahan checkpoint ini belum di-push ke GitHub.
 | `scripts/transcribe_pro.py` | Output transcriber melewati gate yang sama |
 | `tests/test_artifact_contract.py` | Kompatibilitas legacy dan failure-path produksi |
 | `docs/ARTIFACT_CONTRACT.md` | Kontrak, titik gate, operasi, dan batas checkpoint |
+| `core/supervisor.py` | Queue, task state, resource lease, heartbeat, recovery, dan worker |
+| `scripts/supervisor.py` | CLI enqueue/worker/list/show/events/retry/recover |
+| `tests/test_supervisor.py` | Idempotensi, fencing, recovery, retry, adapter, dan CLI |
+| `docs/SUPERVISOR.md` | Operasi dan batas keselamatan Supervisor |
 
 ## Verifikasi
 
-Verifikasi branch artifact pada Linux: **43 passed, 1 skipped**. Skip merupakan
-pemeriksaan font produksi Windows. Tes targeted kontrak dan area terdampak:
-**22 passed**. Compile check dan diff whitespace check berhasil.
+Verifikasi branch Supervisor pada Linux: **54 passed, 1 skipped**. Skip merupakan
+pemeriksaan font produksi Windows. Tes targeted Supervisor/event/observation:
+**27 passed**. Compile check, bantuan CLI, dan diff whitespace check berhasil.
 
 ```powershell
 & ".\.venv\Scripts\python.exe" -m pytest -q
@@ -63,15 +73,15 @@ Remotion, font Windows, atau Telegram live.
 
 ## Langkah berikutnya
 
-Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint C selesai. Berikutnya
-bangun Supervisor minimal dengan locking job, heartbeat/recovery, resource queue,
-dan retry terbatas sebelum dashboard mengklaim status live.
+Sesudah perubahan ini diverifikasi dan di-merge, Checkpoint D selesai. Berikutnya
+bangun artifact dan agent story (universe, outline, screenplay, kritik,
+continuity, shot list) sebelum provider animation dan AI Office.
 
-Snapshot STARTING/WORKING atau manifest delivery `sending` yang ditinggalkan proses
-mati belum direkonsiliasi otomatis. Database event hanya observabilitas; bukan
-auto-resume. COMPLETED tidak berarti approved atau published. Jangan memulai dua
-writer pada job sama. Fingerprint belum menjadi kebijakan invalidasi otomatis;
-detail batas kontrak tercatat dalam `ARTIFACT_CONTRACT.md`.
+Task dengan heartbeat mati direkonsiliasi ke `RECOVERY_REQUIRED`, tetapi tidak
+auto-resume. Pastikan proses lama berhenti sebelum retry manual. Lock hanya berlaku
+untuk pekerjaan melalui Supervisor; jangan menjalankan CLI langsung bersamaan pada
+job yang sama. COMPLETED tidak berarti approved atau published. Fingerprint belum
+menjadi kebijakan invalidasi otomatis.
 
 Git push memerlukan persetujuan sesuai permission model handoff pengguna.
 Jangan mengirim Telegram atau mempublikasikan video sebagai bagian smoke test.

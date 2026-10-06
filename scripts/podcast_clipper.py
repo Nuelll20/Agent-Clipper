@@ -2076,7 +2076,11 @@ def command_doctor(_: argparse.Namespace) -> int:
 def command_runs(args: argparse.Namespace) -> int:
     store = EventStore(Path(args.event_db).expanduser())
     try:
-        print(json.dumps(store.list_runs(args.job, args.limit), ensure_ascii=False, indent=2))
+        print(json.dumps(
+            store.list_runs(args.job, args.limit, task_id=args.task),
+            ensure_ascii=False,
+            indent=2,
+        ))
     finally:
         store.close()
     return 0
@@ -2107,7 +2111,12 @@ def execute_observed(args: argparse.Namespace) -> int:
         if not isinstance(manifest, dict):
             raise WorkflowError("render-manifest.json harus berupa object.")
         job_id = safe_job_id(str(manifest.get("job_id") or ""))
-    observer = RunObserver(Path(args.event_db).expanduser(), job_id, "CLIP_" + args.command.upper())
+    observer = RunObserver(
+        Path(args.event_db).expanduser(),
+        job_id,
+        "CLIP_" + args.command.upper(),
+        task_id=getattr(args, "task_id", None),
+    )
     args.observer = observer
     try:
         result = int(args.handler(args) or 0)
@@ -2146,6 +2155,7 @@ def build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("--force-transcribe", action="store_true")
     ingest.add_argument("--force-plan", action="store_true")
     ingest.add_argument("--event-db", default=str(default_event_db()))
+    ingest.add_argument("--task-id", help="Task supervisor pemilik invocation ini")
     ingest.set_defaults(handler=command_ingest)
 
     validate = subparsers.add_parser("validate", help="Validasi clip-plan.json")
@@ -2158,6 +2168,7 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--no-send", action="store_true")
     render.add_argument("--continue-on-error", action="store_true")
     render.add_argument("--event-db", default=str(default_event_db()))
+    render.add_argument("--task-id", help="Task supervisor pemilik invocation ini")
     render.set_defaults(handler=command_render)
 
     deliver = subparsers.add_parser(
@@ -2172,6 +2183,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Kirim ulang meski manifest sudah mencatat status sent",
     )
     deliver.add_argument("--event-db", default=str(default_event_db()))
+    deliver.add_argument("--task-id", help="Task supervisor pemilik invocation ini")
     deliver.set_defaults(handler=command_deliver)
 
     watch = subparsers.add_parser("watch", help="Pantau keputusan Telegram")
@@ -2205,6 +2217,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(handler=command_doctor)
     runs = subparsers.add_parser("runs", help="Baca snapshot run produksi")
     runs.add_argument("--job")
+    runs.add_argument("--task")
     runs.add_argument("--limit", type=int, default=20)
     runs.add_argument("--event-db", default=str(default_event_db()))
     runs.set_defaults(handler=command_runs)

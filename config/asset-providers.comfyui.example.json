@@ -20,8 +20,29 @@
       "timeout_seconds": 900
     },
     "animation": {
-      "name": "configure-real-animation-provider",
-      "command": ["C:\\path\\to\\animation-provider.exe"],
+      "name": "comfyui-wan22-animation",
+      "command": [
+        "C:\\path\\to\\Agent-Clipper\\.venv\\Scripts\\python.exe",
+        "C:\\path\\to\\Agent-Clipper\\scripts\\providers\\comfyui_animation.py",
+        "--server",
+        "http://127.0.0.1:8188",
+        "--diffusion-model",
+        "wan2.2_ti2v_5B_fp16.safetensors",
+        "--text-encoder",
+        "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+        "--vae",
+        "wan2.2_vae.safetensors",
+        "--generation-width",
+        "416",
+        "--generation-height",
+        "736",
+        "--max-frames",
+        "49",
+        "--request",
+        "{request}",
+        "--output",
+        "{output}"
+      ],
       "output_extension": ".mp4",
       "timeout_seconds": 3600
     },

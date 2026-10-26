@@ -67,10 +67,10 @@ Health check SDXL:
 
 Salin `config/asset-providers.comfyui.example.json` menjadi
 `config/asset-providers.local.json`, lalu perbaiki kedua path pada command
-`reference`. Tiga provider lain sengaja tetap berupa placeholder sampai provider
-video, TTS, dan SFX nyata dipasang. Karena itu, konfigurasi ini aman dipakai lebih
-dahulu dengan generation selektif `--asset reference`; jangan menjalankan semua
-kind sebelum ketiga provider lain siap.
+`reference` dan `animation`. Provider TTS dan SFX tetap berupa placeholder sampai
+provider nyata dipasang. Karena itu, gunakan generation selektif `--asset
+reference --asset animation`; jangan menjalankan semua kind sebelum kedua
+provider audio siap.
 
 IP-Adapter bersifat opsional. Tambahkan argumen berikut pada command `reference`:
 
@@ -83,6 +83,45 @@ Bridge mengunggah file ke input ComfyUI dengan nama berbasis hash, memverifikasi
 hash sebelum setiap generation, lalu memakai `IPAdapterAdvanced`. Hash wajib agar
 perubahan file referensi tidak lolos diam-diam. Perubahan command atau hash juga
 mengubah fingerprint provider config dan mewajibkan asset plan baru.
+
+### Bridge animation Wan 2.2
+
+Bridge `scripts/providers/comfyui_animation.py` mengubah request asset
+`animation` menjadi workflow native Wan 2.2 TI2V. Provider tidak menerima path
+reference secara longgar. Ia mencari completed reference attempt milik shot yang
+sama, mencocokkan `dependency_artifacts` dengan fingerprint output, menghitung
+ulang SHA-256 file, lalu baru mengunggah gambar tersebut ke ComfyUI. Reference
+yang hilang, berubah, berada di luar production root, atau tidak cocok dengan
+lineage membuat generation gagal tertutup.
+
+Health check Wan:
+
+```powershell
+& ".\.venv\Scripts\python.exe" scripts\providers\comfyui_animation.py `
+  --server "http://127.0.0.1:8188" `
+  --diffusion-model "wan2.2_ti2v_5B_fp16.safetensors" `
+  --text-encoder "umt5_xxl_fp8_e4m3fn_scaled.safetensors" `
+  --vae "wan2.2_vae.safetensors" `
+  --generation-width 416 `
+  --generation-height 736 `
+  --max-frames 49 `
+  --health-check
+```
+
+`generation-width` dan `generation-height` adalah resolusi inferensi yang harus
+kelipatan 32. Setelah decode, `ImageScale` mengubah frame ke ukuran yang diminta
+asset plan, misalnya 720×1280. Nilai 416×736 dan 49 frame adalah preset yang sudah
+divalidasi pada RTX 4060 Laptop 8 GB dalam mode low-VRAM.
+
+Wan memakai jumlah frame berpola `4n+1`. Bridge menghitung frame dari durasi dan
+fps, membulatkannya ke pola tersebut, lalu membatasi dengan `--max-frames`.
+Apabila request lebih panjang daripada batas, output menjadi lebih pendek dan
+`duration_clamped` tercatat pada output JSON provider. Gunakan shot pendek,
+naikkan batas setelah pengujian VRAM, atau tangani extension pada Checkpoint G;
+jangan menganggap asset `COMPLETED` otomatis telah lolos pemeriksaan durasi.
+
+Output diambil melalui `/view`, diperiksa sebagai container MP4, dan dipindahkan
+secara atomik ke path attempt. Server selain loopback ditolak.
 
 ## 1. Voice cast
 

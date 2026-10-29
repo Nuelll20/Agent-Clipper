@@ -107,7 +107,6 @@ Health check Wan:
   --max-frames 49 `
   --health-check
 ```
-
 `generation-width` dan `generation-height` adalah resolusi inferensi yang harus
 kelipatan 32. Setelah decode, `ImageScale` mengubah frame ke ukuran yang diminta
 asset plan, misalnya 720×1280. Nilai 416×736 dan 49 frame adalah preset yang sudah
@@ -122,6 +121,26 @@ jangan menganggap asset `COMPLETED` otomatis telah lolos pemeriksaan durasi.
 
 Output diambil melalui `/view`, diperiksa sebagai container MP4, dan dipindahkan
 secara atomik ke path attempt. Server selain loopback ditolak.
+
+### Quick Video Agent
+
+Untuk membuat satu video pendek tanpa menulis request JSON secara manual,
+gunakan `scripts/video_agent.py`. Perintah ini menjalankan alur berikut:
+
+1. Membuat request gambar referensi dari ide.
+2. Menjalankan Reference Agent melalui SDXL.
+3. Menghitung SHA-256 gambar secara otomatis.
+4. Mengikat gambar sebagai dependency Video Agent.
+5. Menjalankan Wan 2.2 untuk menghasilkan video.
+6. Menyimpan request, gambar, video, manifest, dan event agent.
+
+Contoh penggunaan:
+
+```powershell
+& ".\.venv\Scripts\python.exe" scripts\video_agent.py `
+  --idea "A realistic wood frog resting on wet green moss" `
+  --motion "The frog slowly turns its head and blinks once." `
+  --story-id "frog-auto-test"
 
 ## 1. Voice cast
 

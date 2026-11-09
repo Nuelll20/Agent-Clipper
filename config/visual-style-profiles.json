@@ -1,0 +1,78 @@
+{
+  "schema_version": "1.0",
+  "default_delivery_profile": "shorts-720p60",
+  "default_visual_style": "neutral",
+  "delivery_profiles": [
+    {
+      "name": "shorts-720p60",
+      "aspect_ratio": "9:16",
+      "width": 720,
+      "height": 1280,
+      "target_fps": 60,
+      "orientation": "portrait",
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "interpolation_method": "ffmpeg-minterpolate",
+      "pixel_format": "yuv420p",
+      "crf": 18,
+      "preset": "slow",
+      "audio_bitrate": "192k",
+      "audio_sample_rate": 48000
+    }
+  ],
+  "visual_profiles": [
+    {
+      "name": "neutral",
+      "description": "Balanced visual style with no strong artistic direction. Suitable as a starting point for any subject.",
+      "status": "development",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "reference_steps": 20,
+      "reference_cfg": 6.0,
+      "reference_sampler": "dpmpp_2m",
+      "reference_scheduler": "karras",
+      "reference_prompt_suffix": "clear intentional composition, balanced physically plausible lighting, coherent subject structure, consistent details, clean vertical composition",
+      "reference_negative_prompt_suffix": "text, watermark, logo, blurry, low quality, malformed structure, duplicated elements, corrupted details",
+      "animation_prompt_suffix": "stable natural motion, preserve the reference appearance, no scene cut, no text, no watermark"
+    },
+    {
+      "name": "photoreal",
+      "description": "Photorealistic visual style with physically plausible lighting, natural material response, true-to-life colors, and coherent proportions.",
+      "status": "development",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "reference_steps": 30,
+      "reference_cfg": 5.5,
+      "reference_sampler": "dpmpp_2m",
+      "reference_scheduler": "karras",
+      "reference_prompt_suffix": "high-quality photorealistic image, physically plausible lighting, true-to-life colors, natural material response, coherent proportions, restrained contrast, clean vertical composition",
+      "reference_negative_prompt_suffix": "text, watermark, logo, blurry, low quality, malformed structure, duplicated elements, corrupted details, cgi, plastic surface, waxy surface, artificial gloss, excessive bloom, oversaturated colors, illustration, cartoon",
+      "animation_prompt_suffix": "photorealistic footage, physically plausible motion, stable coherent proportions, natural material response, preserve the reference appearance, continuous shot, no text, no watermark"
+    },
+    {
+      "name": "corporate-3d",
+      "description": "Clean professional 3D visualization with coherent geometry, realistic office scale, controlled materials and lighting.",
+      "status": "development",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "reference_steps": 22,
+      "reference_cfg": 6.5,
+      "reference_sampler": "dpmpp_2m",
+      "reference_scheduler": "karras",
+      "reference_prompt_suffix": "clean professional 3D visualization, coherent geometry, realistic office scale, controlled materials and lighting, clean vertical composition",
+      "reference_negative_prompt_suffix": "text, watermark, logo, blurry, low quality, deformed geometry, broken mesh",
+      "animation_prompt_suffix": "smooth professional 3D animation, stable geometry, controlled camera, preserve the reference appearance, no scene cut, no text, no watermark"
+    },
+    {
+      "name": "children-cartoon",
+      "description": "Friendly stylized characters with readable shapes, appealing colors, and age-appropriate visual design.",
+      "status": "development",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "reference_steps": 20,
+      "reference_cfg": 7.0,
+      "reference_sampler": "dpmpp_2m",
+      "reference_scheduler": "karras",
+      "reference_prompt_suffix": "friendly stylized characters, readable shapes, appealing colors, age-appropriate visual design, clean vertical composition",
+      "reference_negative_prompt_suffix": "text, watermark, logo, blurry, low quality, deformed anatomy, scary, violent, inappropriate",
+      "animation_prompt_suffix": "friendly animated motion, smooth character movement, appealing visual flow, preserve the reference appearance, no scene cut, no text, no watermark"
+    }
+  ]
+}

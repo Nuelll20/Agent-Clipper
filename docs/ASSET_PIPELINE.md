@@ -124,23 +124,147 @@ secara atomik ke path attempt. Server selain loopback ditolak.
 
 ### Quick Video Agent
 
-Untuk membuat satu video pendek tanpa menulis request JSON secara manual,
-gunakan `scripts/video_agent.py`. Perintah ini menjalankan alur berikut:
+`scripts/video_agent.py` membuat satu video pendek vertikal dari sebuah ide
+melalui pipeline ComfyUI lokal. Pipeline tidak menggunakan satu prompt generik
+untuk semua tema. Setiap produksi memilih visual profile yang sesuai dengan
+jenis konten.
 
-1. Membuat request gambar referensi dari ide.
-2. Menjalankan Reference Agent melalui SDXL.
-3. Menghitung SHA-256 gambar secara otomatis.
-4. Mengikat gambar sebagai dependency Video Agent.
-5. Menjalankan Wan 2.2 untuk menghasilkan video.
-6. Menyimpan request, gambar, video, manifest, dan event agent.
+Alur yang dijalankan:
+
+1. Memuat visual profile dan delivery profile.
+2. Memeriksa kesehatan provider reference, animation, dan finalization.
+3. Membuat request gambar referensi dari ide.
+4. Menghasilkan gambar referensi melalui SDXL.
+5. Menghitung SHA-256 gambar referensi.
+6. Melepas model reference dan membersihkan memori ComfyUI.
+7. Mengikat gambar referensi sebagai dependency animasi.
+8. Menghasilkan `video-source.mp4` melalui Wan 2.2.
+9. Melakukan finalisasi ke format Shorts 720x1280 60 fps.
+10. Menyimpan request, artifact, hash, status, health check, resource handoff,
+    dan hasil probe di `run-manifest.json`.
 
 Contoh penggunaan:
 
 ```powershell
-& ".\.venv\Scripts\python.exe" scripts\video_agent.py `
-  --idea "A realistic wood frog resting on wet green moss" `
-  --motion "The frog slowly turns its head and blinks once." `
-  --story-id "frog-auto-test"
+& ".\.venv\Scripts\python.exe" `
+  ".\scripts\video_agent.py" `
+  --idea "A clean professional 3D visualization of a modern office" `
+  --motion "The camera slowly moves forward while the office geometry remains stable." `
+  --visual-style "corporate-3d" `
+  --story-id "office-visual-test" `
+  --production-id "office-visual-take-01" `
+  --seed 20261109
+```
+
+Output produksi disimpan di:
+
+```text
+productions/quick-video/<production-id>/
+├── reference-request.json
+├── reference.png
+├── animation-request.json
+├── video-source.mp4
+├── video.mp4
+└── run-manifest.json
+```
+
+`video-source.mp4` merupakan hasil langsung provider animasi. `video.mp4`
+merupakan artifact delivery yang telah melewati finalizer.
+
+#### Visual profile
+
+Konfigurasi visual tersedia di
+`config/visual-style-profiles.json`. Profile awal yang tersedia:
+
+- `neutral`
+- `photoreal`
+- `corporate-3d`
+- `children-cartoon`
+
+Visual profile mengatur checkpoint, sampler, scheduler, steps, CFG, positive
+prompt suffix, negative prompt suffix, dan arahan animasi. Status
+`development` berarti profile telah dapat diuji tetapi belum dijamin memenuhi
+standar visual produksi untuk semua tema.
+
+Profile merupakan arahan gaya, bukan pengganti perencanaan shot. Ide, subjek,
+komposisi, pencahayaan, gerakan kamera, dan negative prompt tetap harus
+disesuaikan dengan tujuan setiap video.
+
+#### Delivery Shorts
+
+Delivery profile utama adalah `shorts-720p60`:
+
+- aspect ratio: 9:16
+- resolution: 720x1280
+- frame rate: 60 fps
+- container: MP4
+- video codec: H.264
+- pixel format: yuv420p
+- audio codec target: AAC
+
+Wan 2.2 saat ini menghasilkan source pada 24 fps. Finalizer menggunakan FFmpeg
+`minterpolate` untuk menghasilkan delivery 60 fps. Dengan demikian, output
+60 fps saat ini merupakan hasil motion interpolation dan bukan generation
+native 60 fps.
+
+Audio hanya dipertahankan atau dikodekan apabila source memiliki audio. Quick
+Video Agent saat ini belum mempunyai provider voice, music, atau SFX sehingga
+hasil smoke test dapat memiliki `has_audio: false`.
+
+#### Resource handoff
+
+Setelah reference selesai, pipeline memanggil endpoint ComfyUI `/free` dengan:
+
+```json
+{
+  "unload_models": true,
+  "free_memory": true
+}
+```
+
+Handoff ini melepaskan model SDXL sebelum Wan 2.2 dimuat. Hasilnya dicatat pada
+`resource_handoffs` di manifest agar perpindahan provider dapat diaudit.
+
+Pada mesin Windows dengan RAM 16 GB dan GPU 8 GB, jalankan ComfyUI dengan
+`--disable-pinned-memory`. Pagefile yang memadai juga diperlukan untuk
+mengurangi risiko kegagalan pembacaan host buffer ketika berpindah dari model
+reference ke model animation.
+
+#### Status dan quality gate
+
+Status penting pada pipeline:
+
+- `AWAITING_REFERENCE_QC`: reference tersedia dan menunggu pemeriksaan visual.
+- `AWAITING_FINALIZATION`: source animation tersedia dan menunggu finalizer.
+- `AWAITING_FINAL_QC`: video delivery tersedia dan menunggu pemeriksaan akhir.
+- `FAILED`: salah satu tahap gagal dan informasi kegagalan dicatat.
+- `COMPLETED`: hanya digunakan setelah artifact benar-benar disetujui.
+
+Pipeline tidak menandai hasil sebagai `COMPLETED` hanya karena file berhasil
+dibuat. Operator tetap harus memeriksa komposisi, anatomi atau geometri,
+konsistensi subjek, gerakan, ghosting, flicker, durasi, audio, dan kelayakan
+tayang.
+
+#### Failure manifest
+
+Jika pipeline gagal, `run-manifest.json` tetap ditulis dengan state `FAILED`.
+Informasi kegagalan mencakup:
+
+```json
+{
+  "failure": {
+    "stage": "finalization",
+    "error_type": "VideoFinalizeError",
+    "message": "Ringkasan kesalahan",
+    "occurred_at": "timestamp"
+  }
+}
+```
+
+Tahap kegagalan dapat berupa `health_check`, `reference_generation`,
+`resource_cleanup`, `animation_generation`, atau `finalization`. Artifact yang
+sudah berhasil dibuat tetap dicatat agar diagnosis dan retry tidak dimulai
+tanpa konteks.
 
 ## 1. Voice cast
 
@@ -183,8 +307,11 @@ Copy-Item ".\config\asset-providers.example.json" `
   --production-id "episode-001-v1"
 ```
 
-Output menunjukkan path `asset-plan.json`. Plan default memakai 720×1280 dan
-30 fps; dapat diubah dengan `--width`, `--height`, dan `--fps` sebelum generation.
+Asset plan lama memakai 720x1280 dan 30 fps sebagai setting generation.
+Nilai tersebut bukan delivery profile final. Jalur Quick Video Agent
+menghasilkan delivery Shorts 720x1280 60 fps melalui
+`scripts/providers/video_finalize.py`. Integrasi finalizer ke jalur Supervisor
+yang lama masih menjadi pekerjaan lanjutan.
 
 ## 3. Generation melalui Supervisor
 
@@ -230,8 +357,11 @@ artifact yang tercatat masih valid. Dengan flag tersebut, hanya status
 
 ## Batas checkpoint
 
-Repository menyediakan kontrak provider dan command bridge, bukan bundel model
-ComfyUI/TTS/video tertentu. Provider nyata, model weights, kebutuhan VRAM, dan
-lisensi model harus dipilih serta diuji di laptop pengguna. Belum ada episode
-timeline, mixing audio, encoder final, black-frame detection, lipsync, background
-music director, AI Office, atau upload YouTube.
+Repository menyediakan provider reference ComfyUI, provider animasi Wan 2.2,
+resource handoff, visual profile, dan finalizer Shorts untuk jalur Quick Video
+Agent. Model weights, kebutuhan VRAM, pagefile, dan lisensi model tetap harus
+dipilih serta diuji pada mesin operator. Pipeline belum memiliki voice
+provider, SFX provider, music director, episode timeline, audio mixing,
+lipsync, black-frame detection, automatic visual scoring, AI Office, atau
+upload YouTube. Integrasi finalizer ke jalur Supervisor lama juga belum
+dilakukan.
